@@ -1,0 +1,6 @@
+/demo_datasets/*
+/checkpoints/
+/venv/
+
+*.cpython-36.pyc
+__pycache__/evaluate.cpython-36.pyc
