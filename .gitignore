@@ -2,5 +2,14 @@
 /checkpoints/
 /venv/
 
-*.cpython-36.pyc
-__pycache__/evaluate.cpython-36.pyc
+*.log
+
+*.pot
+
+*.pyc
+
+*/*/*/__pycache__/
+
+*/*/__pycache__/
+
+*/__pycache__/
