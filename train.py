@@ -25,10 +25,11 @@ MAX_FLOW = 1000
 SUM_FREQ = 100
 VAL_FREQ = 5000
 
+
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-def sequence_loss(flow_preds, flow_gt, valid, sup_loss = 'l1', tv_loss = None):
+def sequence_loss(flow_preds, flow_gt, valid, sup_loss = 'l1', tv_weight = 0):
     """ Loss function defined over sequence of flow predictions """
 
     n_predictions = len(flow_preds)    
@@ -45,8 +46,8 @@ def sequence_loss(flow_preds, flow_gt, valid, sup_loss = 'l1', tv_loss = None):
         elif sup_loss == 'l2':
             i_loss = (flow_preds[i] - flow_gt)**2
         
-        if tv_loss == None:
-            i_tv = 0
+        if tv_weight > 0:
+            i_tv = tv_weight * total_variation(flow_preds[i])
 
         flow_loss += i_weight * (valid[:, None] * (i_loss + i_tv)).mean()
 
@@ -62,6 +63,17 @@ def sequence_loss(flow_preds, flow_gt, valid, sup_loss = 'l1', tv_loss = None):
     }
 
     return flow_loss, metrics
+
+def total_variation(flow):
+    Dx = torch.tensor([[1, 0, -1], [2, 0, -2], [1, 0, -1]], dtype = torch.float, requires_grad = False).view(1,1,3,3).cuda()
+    Dy = torch.tensor([[1, 2, 1], [0, 0, 0], [-1, -2, -1]], dtype = torch.float, requires_grad = False).view(1,1,3,3).cuda()
+    D = torch.cat((Dx, Dy), dim = 0)
+
+    u,v = torch.split(flow, 1, dim = 1)
+    Du = F.conv2d(u, D, padding = 1)
+    Dv = F.conv2d(v, D, padding = 1)
+    
+    return torch.cat((Du.sum(dim = 1, keepdim = True), Dv.sum(dim = 1, keepdim = True)), dim = 1)
 
 
 def fetch_dataloader(args):
@@ -162,7 +174,7 @@ def train(args):
             optimizer.zero_grad()
             flow_predictions = model(image1, image2, iters=args.iters)
             
-            loss, metrics = sequence_loss(flow_predictions, flow, valid, sup_loss=args.sup_loss)
+            loss, metrics = sequence_loss(flow_predictions, flow, valid, sup_loss=args.sup_loss, tv_weight = args.tv_weight)
             loss.backward()
 
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
@@ -199,6 +211,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--lr', type=float, default=0.00002)
     parser.add_argument('--sup_loss', help='supervised loss term', default='l1')
+    parser.add_argument('--tv_weight', type=float, help='total variation term weight', default=0)
     parser.add_argument('--num_steps', type=int, default=100000)
     parser.add_argument('--batch_size', type=int, default=6)
     parser.add_argument('--image_size', type=int, nargs='+', default=[384, 512])
