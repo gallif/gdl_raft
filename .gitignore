@@ -1,6 +1,10 @@
 /demo_datasets/*
 /checkpoints/
 /venv/
+/out/
+
+*.json
+*.pyc
 
 *.log
 

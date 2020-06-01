@@ -12,8 +12,8 @@ import random
 from glob import glob
 import os.path as osp
 
-from utils import frame_utils
-from utils.augmentor import FlowAugmentor, FlowAugmentorKITTI
+from core.utils import frame_utils
+from core.utils.augmentor import FlowAugmentor, FlowAugmentorKITTI
 
 
 class CombinedDataset(data.Dataset):
@@ -23,7 +23,7 @@ class CombinedDataset(data.Dataset):
     def __len__(self):
         length = 0 
         for i in range(len(self.datasets)):
-            length += len(self.datsaets[i])
+            length += len(self.datasets[i])
         return length
 
     def __getitem__(self, index):
