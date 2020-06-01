@@ -29,7 +29,7 @@ VAL_FREQ = 5000
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-def sequence_loss(flow_preds, flow_gt, valid, sup_loss = 'l1', tv_weight = 0):
+def sequence_loss(flow_preds, flow_gt, valid, sup_loss = 'l1', tv_weight = 0.0):
     """ Loss function defined over sequence of flow predictions """
 
     n_predictions = len(flow_preds)    
@@ -46,8 +46,10 @@ def sequence_loss(flow_preds, flow_gt, valid, sup_loss = 'l1', tv_weight = 0):
         elif sup_loss == 'l2':
             i_loss = (flow_preds[i] - flow_gt)**2
         
-        if tv_weight > 0:
+        if tv_weight > 0.0:
             i_tv = tv_weight * total_variation(flow_preds[i])
+        else:
+            i_tv = 0.0
 
         flow_loss += i_weight * (valid[:, None] * (i_loss + i_tv)).mean()
 
@@ -211,7 +213,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--lr', type=float, default=0.00002)
     parser.add_argument('--sup_loss', help='supervised loss term', default='l1')
-    parser.add_argument('--tv_weight', type=float, help='total variation term weight', default=0)
+    parser.add_argument('--tv_weight', type=float, help='total variation term weight', default=0.0)
     parser.add_argument('--num_steps', type=int, default=100000)
     parser.add_argument('--batch_size', type=int, default=6)
     parser.add_argument('--image_size', type=int, nargs='+', default=[384, 512])
