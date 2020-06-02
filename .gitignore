@@ -5,6 +5,7 @@
 
 *.json
 *.pyc
+*.sh
 
 *.log
 

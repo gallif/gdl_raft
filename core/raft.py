@@ -3,10 +3,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from modules.update import BasicUpdateBlock, SmallUpdateBlock
-from modules.extractor import BasicEncoder, SmallEncoder
-from modules.corr import CorrBlock
-from utils.utils import bilinear_sampler, coords_grid, upflow8
+from core.modules.update import BasicUpdateBlock, SmallUpdateBlock
+from core.modules.extractor import BasicEncoder, SmallEncoder
+from core.modules.corr import CorrBlock
+from core.utils.utils import bilinear_sampler, coords_grid, upflow8
 
 
 class RAFT(nn.Module):

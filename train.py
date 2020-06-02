@@ -85,8 +85,8 @@ def fetch_dataloader(args):
         train_dataset = datasets.FlyingChairs(args, root=args.data_dir, image_size=args.image_size)
     
     elif args.dataset == 'things':
-        clean_dataset = datasets.SceneFlow(args, image_size=args.image_size, dstype='frames_cleanpass')
-        final_dataset = datasets.SceneFlow(args, image_size=args.image_size, dstype='frames_finalpass')
+        clean_dataset = datasets.SceneFlow(args, root=args.data_dir, image_size=args.image_size, dstype='frames_cleanpass')
+        final_dataset = datasets.SceneFlow(args, root=args.data_dir, image_size=args.image_size, dstype='frames_finalpass')
         train_dataset = clean_dataset + final_dataset
 
     elif args.dataset == 'sintel':

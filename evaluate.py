@@ -16,8 +16,6 @@ import core.datasets as datasets
 from core.utils import flow_viz
 from core.raft import RAFT
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
-
 def validate_chairs(args, model, iters=12):
     """ Evaluate trained model on Flying Chairs """
     model.eval()
@@ -113,8 +111,14 @@ if __name__ == '__main__':
     parser.add_argument('--sintel_iters', type=int, default=50)
     parser.add_argument('--kitti_iters', type=int, default=32)
     parser.add_argument('--dataset', help='dataset used for eval')
+    parser.add_argument('--data_dir', help='path to dataset')
+    parser.add_argument('--cuda_devices', default="0,1", help="choose which GPUs are available")
+
+
 
     args = parser.parse_args()
+
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda_devices
 
     model = RAFT(args)
     model = torch.nn.DataParallel(model)

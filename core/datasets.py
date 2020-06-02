@@ -146,7 +146,7 @@ class MpiSintel(FlowDataset):
 
 
 class FlyingChairs(FlowDataset):
-    def __init__(self, args, image_size=None, do_augument=True, root='../../datasets/FlyingChairs_release/data'):
+    def __init__(self, args, image_size=None, do_augument=True, root='/home/gallif/datasets/FlyingChairs_release/data'):
         super(FlyingChairs, self).__init__(args, image_size, do_augument)
         self.root = root
         if self.do_augument:
