@@ -117,7 +117,7 @@ class MpiSintelTest(FlowDataset):
 
 
 class MpiSintel(FlowDataset):
-    def __init__(self, args, image_size=None, do_augument=True, root='datasets/Sintel/training', dstype='clean'):
+    def __init__(self, args, image_size=None, do_augument=True, root='/home/gallif/datasets/MPI-Sintel-complete//training', dstype='clean'):
         super(MpiSintel, self).__init__(args, image_size, do_augument)
         if do_augument:
             self.augumentor.min_scale = -0.2

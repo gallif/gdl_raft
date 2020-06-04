@@ -50,7 +50,7 @@ def validate_sintel(args, model, iters=50):
         val_dataset = datasets.MpiSintel(args, do_augument=False, dstype=dstype)
         
         epe_list = []
-        for i in range(len(val_dataset)):
+        for i in tqdm(range(len(val_dataset))):
             image1, image2, flow_gt, _ = val_dataset[i]
             image1 = image1[None].cuda()
             image2 = image2[None].cuda()
