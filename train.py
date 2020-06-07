@@ -233,6 +233,7 @@ if __name__ == '__main__':
 
     if (not os.path.isdir(args.log_dir) and args.save_checkpoints) is True:
         os.mkdir(args.log_dir)
+        print("Checkpoints will be saved to " + args.log_dir)
 
     # scale learning rate and batch size by number of GPUs
     os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda_devices
