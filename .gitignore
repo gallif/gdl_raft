@@ -2,7 +2,8 @@
 /checkpoints/
 /venv/
 /out/
-
+limmit_cpu_wrapper.py
+cpus_ver2.py
 *.json
 *.pyc
 *.sh

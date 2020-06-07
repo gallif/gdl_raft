@@ -115,9 +115,10 @@ def fetch_optimizer(args, model):
     
 
 class Logger:
-    def __init__(self, model, scheduler):
+    def __init__(self, model, scheduler, name):
         self.model = model
         self.scheduler = scheduler
+        self.name = name
         self.total_steps = 0
         self.running_loss = {}
 
@@ -125,9 +126,10 @@ class Logger:
         metrics_data = [self.running_loss[k]/SUM_FREQ for k in sorted(self.running_loss.keys())]
         training_str = "[{:6d}, {:10.7f}] ".format(self.total_steps+1, self.scheduler.get_lr()[0])
         metrics_str = ("{:10.4f}, "*len(metrics_data)).format(*metrics_data)
+        name_str = self.name + " : "
         
         # print the training status
-        print(training_str + metrics_str)
+        print(name_str + training_str + metrics_str)
 
         for key in self.running_loss:
             self.running_loss[key] = 0.0
@@ -165,7 +167,7 @@ def train(args):
     optimizer, scheduler = fetch_optimizer(args, model)
 
     total_steps = 0
-    logger = Logger(model, scheduler)
+    logger = Logger(model, scheduler, args.name)
 
     should_keep_training = True
     while should_keep_training:
@@ -186,7 +188,7 @@ def train(args):
 
             logger.push(metrics)
 
-            if total_steps % VAL_FREQ == VAL_FREQ-1:
+            if (total_steps % VAL_FREQ == VAL_FREQ-1 and args.save_checkpoints) is True:
                 PATH = args.log_dir + '/%d_%s.pth' % (total_steps+1, args.name)
                 torch.save(model.state_dict(), PATH)
 
@@ -209,6 +211,7 @@ if __name__ == '__main__':
     parser.add_argument('--data_dir', help='path to dataset')
     parser.add_argument('--restore_ckpt', help="restore checkpoint")
     parser.add_argument('--small', action='store_true', help='use small model')
+    parser.add_argument('--save_checkpoints', default=True, help='save checkpoints during training')
     parser.add_argument('--log_dir', default = os.path.join(os.getcwd(), 'checkpoints', datetime.now().strftime('%Y%m%d-%H%M%S')))
 
     parser.add_argument('--lr', type=float, default=0.00002)
@@ -228,7 +231,7 @@ if __name__ == '__main__':
     torch.manual_seed(1234)
     np.random.seed(1234)
 
-    if not os.path.isdir(args.log_dir):
+    if (not os.path.isdir(args.log_dir) and args.save_checkpoints) is True:
         os.mkdir(args.log_dir)
 
     # scale learning rate and batch size by number of GPUs
