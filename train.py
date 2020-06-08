@@ -10,15 +10,20 @@ from datetime import datetime
 import numpy as np
 import matplotlib.pyplot as plt
 
+import tensorflow as tf
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 
+from logger import TBLogger
+from pathlib import Path
 from torch.utils.data import DataLoader
 from core.raft import RAFT
 from evaluate import validate_sintel, validate_kitti
 import core.datasets as datasets
+from core.utils.flow_viz import flow_to_image
 
 # exclude extremly large displacements
 MAX_FLOW = 1000
@@ -113,7 +118,6 @@ def fetch_optimizer(args, model):
 
     return optimizer, scheduler
     
-
 class Logger:
     def __init__(self, model, scheduler, name):
         self.model = model
@@ -131,11 +135,14 @@ class Logger:
         # print the training status
         print(name_str + training_str + metrics_str)
 
-        for key in self.running_loss:
-            self.running_loss[key] = 0.0
+        #for key in self.running_loss:
+        #    self.running_loss[key] = 0.0
 
     def push(self, metrics):
         self.total_steps += 1
+
+        if self.total_steps % SUM_FREQ == 0:
+            self.running_loss = {}
 
         for key in metrics:
             if key not in self.running_loss:
@@ -145,7 +152,6 @@ class Logger:
 
         if self.total_steps % SUM_FREQ == SUM_FREQ-1:
             self._print_training_status()
-            self.running_loss = {}
 
 
 def train(args):
@@ -168,6 +174,7 @@ def train(args):
 
     total_steps = 0
     logger = Logger(model, scheduler, args.name)
+    tb_logger = TBLogger(args.log_dir)
 
     should_keep_training = True
     while should_keep_training:
@@ -187,6 +194,46 @@ def train(args):
             total_steps += 1
 
             logger.push(metrics)
+
+            if total_steps % SUM_FREQ == SUM_FREQ-1:
+                # Scalar Summaries
+                # ============================================================
+                tb_logger.scalar_summary('lr', optimizer.param_groups[0]['lr'], total_steps)
+                for key, value in logger.running_loss.items():
+                    tb_logger.scalar_summary(key, value, total_steps)
+
+                # Image Summaries
+                # ============================================================
+                B = args.batch_size
+                """
+                vis_batch = []
+                for b in range(B):
+                    batch = [np.array(fl_pred[b].detach().squeeze(0).cpu()).transpose(1,2,0) for fl_pred in flow_predictions]
+                    vis = batch + [flow[b].detach().cpu().numpy().transpose(1,2,0)]
+                    vis = np.concatenate(list(map(flow_to_image, vis)), axis = 1)
+                    vis_batch.append(vis)
+                tb_logger.image_summary(f'flow', vis_batch, total_steps)
+                """
+                # Images vs. Pred vs. GT
+                gt_list = [np.array(x) for x in np.array(flow.detach().cpu()).transpose(0,2,3,1).tolist()]
+                pr_list = [np.array(x) for x in np.array(flow_predictions[-1].detach().cpu()).transpose(0,2,3,1).tolist()]
+                gt_list = list(map(flow_to_image, gt_list))
+                pr_list = list(map(flow_to_image, pr_list))
+                tb_logger.image_summary('src & tgt, pred, gt', 
+                    [np.concatenate([np.concatenate([i.squeeze(0), j.squeeze(0)], axis = 1), np.concatenate([k, l], axis = 1)], axis=0) 
+                        for i,j,k,l in zip(   np.split(np.array(image1.data.cpu()).astype(np.uint8).transpose(0,2,3,1), B, axis = 0), 
+                                            np.split(np.array(image2.data.cpu()).astype(np.uint8).transpose(0,2,3,1), B, axis = 0),
+                                            gt_list,
+                                            pr_list)
+                    ], 
+                    total_steps)
+
+                # Error
+                pred_batch = [np.array(x) for x in np.array(flow_predictions[-1].detach().cpu()).transpose(0,2,3,1).tolist()]
+                gt_batch = [np.array(x) for x in np.array(flow.detach().cpu()).transpose(0,2,3,1).tolist()]
+                err_batch = [(np.sum(np.abs(pr - gt)**2, axis=2,keepdims=True)**0.5).astype(np.uint8) for pr,gt in zip(pred_batch, gt_batch)]
+                err_vis = [np.concatenate([gt, pr, np.tile(err,(1,1,3))], axis=0) for gt, pr, err in zip(gt_list, pr_list,err_batch )]
+                tb_logger.image_summary(f'Error', err_vis, total_steps)
 
             if (total_steps % VAL_FREQ == VAL_FREQ-1 and args.save_checkpoints) is True:
                 PATH = args.log_dir + '/%d_%s.pth' % (total_steps+1, args.name)
