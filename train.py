@@ -200,7 +200,7 @@ def train(args):
                 # ============================================================
                 tb_logger.scalar_summary('lr', optimizer.param_groups[0]['lr'], total_steps)
                 for key, value in logger.running_loss.items():
-                    tb_logger.scalar_summary(key, value, total_steps)
+                    tb_logger.scalar_summary(key, value/SUM_FREQ, total_steps)
 
                 # Image Summaries
                 # ============================================================
