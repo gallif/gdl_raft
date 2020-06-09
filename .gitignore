@@ -1,5 +1,5 @@
 /demo_datasets/*
-/checkpoints/
+/checkpoints/*
 /venv/
 /out/
 limmit_cpu_wrapper.py

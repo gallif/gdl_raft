@@ -123,6 +123,8 @@ if __name__ == '__main__':
     model = RAFT(args)
     model = torch.nn.DataParallel(model)
     model.load_state_dict(torch.load(args.model))
+    print('Loaded model for eval : ' + args.model)
+
 
     model.to('cuda')
     model.eval()
