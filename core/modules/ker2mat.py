@@ -6,18 +6,21 @@ from PIL import Image, ImageOps
 
 
 class Kernel2MatrixConvertor:
-    def __init__(self,im_shape, ker_shape):
+    def __init__(self,im_shape, kers = [np.array([[1,0,-1],[2,0,-2],[1,0,-1]]),     #Dx
+                                        np.array([[1,2,1],[0,0,0],[-1,-2,-1]])]):   #Dy
+        
+        self.kers = kers
         self.im_H, self.im_W = im_shape
-        self.ker_H, self.ker_W = ker_shape
+        self.ker_H, self.ker_W = kers[0].shape
+        self.D = [self.generate_matrix(ker) for ker in kers]
 
-    def __call__(self, ker):
+    def generate_matrix(self,ker):
         """
         Generates a matrix which performs 2D convolution between input I and filter F by converting the F to a toeplitz matrix and multiply it
           with vectorizes version of I
           By : AliSaaalehi@gmail.com
         
         """
-
         # number of columns and rows of the filter
         ker_H, ker_W = ker.shape
 
@@ -72,25 +75,3 @@ class Kernel2MatrixConvertor:
     def vector_to_matrix(self, vector):
         output_h, output_w = [self.im_H + self.ker_H - 1, self.im_W + self.ker_W - 1]
         return torch.flip(vector.reshape(output_h, output_w), dims=[0])
-
-im_raw = Image.open('sintel_0.png')
-img = np.array(ImageOps.grayscale(im_raw.resize((im_raw.width // 8, im_raw.height // 8))),dtype=np.float)
-h,w = img.shape[:2]
-ker_x = np.array([[-1, 0, 1],[-2, 0, 2],[-1, 0, 1]])
-ker_y = np.array([[-1, -2, -1],[0, 0, 0],[1, 2, 1]])
-k2m = Kernel2MatrixConvertor(img.shape[:2], ker_x.shape)
-D_y = k2m(ker_y)
-D_x = k2m(ker_x)
-img_vec = k2m.matrix_to_vector(torch.from_numpy(img))
-out_vec_x = D_x @ img_vec
-out_vec_y = D_y @ img_vec
-
-out_img_x = k2m.vector_to_matrix(out_vec_x)[1:-1,1:-1]
-out_img_y = k2m.vector_to_matrix(out_vec_y)[1:-1,1:-1]
-
-import matplotlib.pyplot as plt
-plt.figure(), plt.imshow(img,'gray')
-plt.figure(), plt.imshow(out_img_x.numpy(), 'gray')
-plt.figure(), plt.imshow(out_img_y.numpy(), 'gray')
-
-plt.show()
