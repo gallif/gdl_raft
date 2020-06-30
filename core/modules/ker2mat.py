@@ -66,7 +66,7 @@ class Kernel2MatrixConvertor:
                 end_j = start_j + b_w
                 doubly_blocked[start_i: end_i, start_j:end_j] = toeplitz_list[doubly_indices[i,j]-1]
 
-        return torch.from_numpy(doubly_blocked)
+        return torch.from_numpy(doubly_blocked).type(torch.float32)
 
     
     def matrix_to_vector(self, matrix):

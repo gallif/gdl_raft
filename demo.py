@@ -8,6 +8,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from PIL import Image
+import matplotlib.pyplot as plt
 
 import datasets
 from utils import flow_viz
@@ -33,22 +34,33 @@ def load_image(imfile):
     return pad8(img[None]).to(DEVICE)
 
 
-def display(image1, image2, flow, name):
+def display(image1, image2, flow, flow_gt, name):
     image1 = image1.permute(1, 2, 0).cpu().numpy() / 255.0
     image2 = image2.permute(1, 2, 0).cpu().numpy() / 255.0
 
     flow = flow.permute(1, 2, 0).cpu().numpy()
     flow_image = flow_viz.flow_to_image(flow)
-    flow_image = cv2.resize(flow_image, (image1.shape[1], image1.shape[0]))
+
+    flow_gt = flow_gt.permute(1, 2, 0).cpu().numpy()
+    flow_gt_image = flow_viz.flow_to_image(flow_gt)
+
+    im2save = np.concatenate([image1, image2, flow_image, flow_gt_image], axis = 1)
+    error = np.sum(np.abs(flow - flow_gt)**2, axis=2)**0.5
+    Image.fromarray((im2save*255).astype(np.uint8)).save(name)
+    plt.figure(), plt.imshow(error, cmap='gray'), plt.colorbar(), plt.savefig(name.replace(".png","_error.png"),bbox_inches='tight')
+
+
+
+    #flow_image = cv2.resize(flow_image, (image1.shape[1], image1.shape[0]))
 
 
     #cv2.imshow('image1', image1[..., ::-1])
     #cv2.imshow('image2', image2[..., ::-1])
     #cv2.imshow('flow', flow_image[..., ::-1])
     #cv2.waitKey()
-    Image.fromarray((image1*255).astype(np.uint8)).save("./out/"+name+"_1.png")
-    Image.fromarray((image2*255).astype(np.uint8)).save("./out/"+name+"_2.png")
-    Image.fromarray((flow_image*255).astype(np.uint8)).save("./out/"+name+"_flo.png")
+    #Image.fromarray((image1*255).astype(np.uint8)).save("./out/"+name+"_1.png")
+    #Image.fromarray((image2*255).astype(np.uint8)).save("./out/"+name+"_2.png")
+    #Image.fromarray((flow_image*255).astype(np.uint8)).save("./out/"+name+"_flo.png")
 
 
 

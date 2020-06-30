@@ -269,6 +269,11 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=6)
     parser.add_argument('--image_size', type=int, nargs='+', default=[384, 512])
 
+    parser.add_argument('--admm_solver', type=bool, default=False, help='apply admm block')
+    parser.add_argument('--admm_lamb', type=float, default=0.4)
+    parser.add_argument('--admm_rho', type=float, default=0.4)
+    parser.add_argument('--admm_eta', type=float, default=0.4)
+
     parser.add_argument('--iters', type=int, default=12)
     parser.add_argument('--wdecay', type=float, default=.00005)
     parser.add_argument('--epsilon', type=float, default=1e-8)
