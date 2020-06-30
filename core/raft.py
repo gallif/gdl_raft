@@ -3,11 +3,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from core.modules.admm import ADMMSolverBlock
 from core.modules.update import BasicUpdateBlock, SmallUpdateBlock
 from core.modules.extractor import BasicEncoder, SmallEncoder
 from core.modules.corr import CorrBlock
 from core.utils.utils import bilinear_sampler, coords_grid, upflow8
-
 
 class RAFT(nn.Module):
     def __init__(self, args):
@@ -39,6 +39,8 @@ class RAFT(nn.Module):
             self.fnet = BasicEncoder(output_dim=256, norm_fn='instance', dropout=args.dropout)        
             self.cnet = BasicEncoder(output_dim=hdim+cdim, norm_fn='batch', dropout=args.dropout)
             self.update_block = BasicUpdateBlock(self.args, hidden_dim=hdim)
+        
+        self.admm_block = ADMMSolverBlock(shape=[sh // 8 for sh in args.image_size]+[int(args.batch_size/torch.cuda.device_count())], rho=args.admm_rho, lamb=args.admm_lamb, eta=args.admm_eta)
 
     def freeze_bn(self):
         for m in self.modules():
@@ -76,6 +78,9 @@ class RAFT(nn.Module):
         self.update_block.reset_mask(net, inp)
         coords0, coords1 = self.initialize_flow(image1)
 
+        # initialize ADMM values
+        #H = (torch.zeros_like(coords0), torch.zeros_like(coords0)) 
+
         flow_predictions = []
         for itr in range(iters):
             coords1 = coords1.detach()
@@ -86,13 +91,20 @@ class RAFT(nn.Module):
 
             # F(t+1) = F(t) + \Delta(t)
             coords1 = coords1 + delta_flow
-            
+
+            # Apply ADMM Solver
+            if self.args.admm_solver == True:
+                Q = self.admm_block(coords1 - coords0)
+                coords1 = coords0 + Q.type(torch.float32)
+            else:
+                Q = coords1 - coords0
+
             if upsample:
-                flow_up = upflow8(coords1 - coords0)
+                flow_up = upflow8(Q)
                 flow_predictions.append(flow_up)
             
             else:
-                flow_predictions.append(coords1 - coords0)
+                flow_predictions.append(Q)
 
         return flow_predictions
 

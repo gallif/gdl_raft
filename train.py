@@ -112,18 +112,16 @@ def fetch_dataloader(args):
 def fetch_optimizer(args, model):
     """ Create the optimizer and learning rate scheduler """
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wdecay, eps=args.epsilon)
-
     scheduler = optim.lr_scheduler.OneCycleLR(optimizer, args.lr, args.num_steps,
-        pct_start=0.2, cycle_momentum=False, anneal_strategy='linear', final_div_factor=1.0)
-
+        pct_start=args.pct_start, cycle_momentum=False, anneal_strategy='linear', final_div_factor=1.0)
     return optimizer, scheduler
     
 class Logger:
-    def __init__(self, model, scheduler, name):
+    def __init__(self, initial_step, model, scheduler, name):
         self.model = model
         self.scheduler = scheduler
         self.name = name
-        self.total_steps = 0
+        self.total_steps = initial_step
         self.running_loss = {}
 
     def _print_training_status(self):
@@ -172,8 +170,8 @@ def train(args):
     train_loader = fetch_dataloader(args)
     optimizer, scheduler = fetch_optimizer(args, model)
 
-    total_steps = 0
-    logger = Logger(model, scheduler, args.name)
+    total_steps = args.initial_step
+    logger = Logger(args.initial_step, model, scheduler, args.name)
     tb_logger = TBLogger(args.log_dir)
 
     should_keep_training = True
@@ -262,11 +260,19 @@ if __name__ == '__main__':
     parser.add_argument('--log_dir', default = os.path.join(os.getcwd(), 'checkpoints', datetime.now().strftime('%Y%m%d-%H%M%S')))
 
     parser.add_argument('--lr', type=float, default=0.00002)
+    parser.add_argument('--pct_start', type=float, default=0.2)
+    parser.add_argument('--final_div_factor', type=float, default=1.0)
     parser.add_argument('--sup_loss', help='supervised loss term', default='l1')
     parser.add_argument('--tv_weight', type=float, help='total variation term weight', default=0.0)
     parser.add_argument('--num_steps', type=int, default=100000)
+    parser.add_argument('--initial_step', type=int, default=0)
     parser.add_argument('--batch_size', type=int, default=6)
     parser.add_argument('--image_size', type=int, nargs='+', default=[384, 512])
+
+    parser.add_argument('--admm_solver', type=bool, default=False, help='apply admm block')
+    parser.add_argument('--admm_lamb', type=float, default=0.4)
+    parser.add_argument('--admm_rho', type=float, default=0.4)
+    parser.add_argument('--admm_eta', type=float, default=0.4)
 
     parser.add_argument('--iters', type=int, default=12)
     parser.add_argument('--wdecay', type=float, default=.00005)

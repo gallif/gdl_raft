@@ -15,6 +15,9 @@ from tqdm import tqdm
 import core.datasets as datasets
 from core.utils import flow_viz
 from core.raft import RAFT
+from demo import display
+
+SAVE_FREQ = 50
 
 def validate_chairs(args, model, iters=12):
     """ Evaluate trained model on Flying Chairs """
@@ -65,6 +68,12 @@ def validate_sintel(args, model, iters=50):
             epe = torch.sqrt(epe).mean()
             epe_list.append(epe.item())
 
+            if args.save_images and i % SAVE_FREQ == 0:
+                display(image1[0,:,pad:-pad], image2[0,:,pad:-pad], flow_pr, flow_gt, os.path.join(args.log_dir, dstype + "_{}.png".format(i)))
+
+
+
+
         print("Validation (%s) EPE: %f" % (dstype, np.mean(epe_list)))
 
 
@@ -106,24 +115,31 @@ def validate_kitti(args, model, iters=32):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument('--name', help='name your results')
     parser.add_argument('--model', help="restore checkpoint")
     parser.add_argument('--small', action='store_true', help='use small model')
     parser.add_argument('--sintel_iters', type=int, default=50)
     parser.add_argument('--kitti_iters', type=int, default=32)
     parser.add_argument('--dataset', help='dataset used for eval')
     parser.add_argument('--data_dir', help='path to dataset')
+    parser.add_argument('--admm_solver', type=bool, default=False)
     parser.add_argument('--cuda_devices', default="0,1", help="choose which GPUs are available")
+    parser.add_argument('--save_images', type=bool, default=False)
 
 
 
     args = parser.parse_args()
-
+    args.log_dir = os.path.join(os.getcwd(), 'out', args.name)
     os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda_devices
 
     model = RAFT(args)
     model = torch.nn.DataParallel(model)
     model.load_state_dict(torch.load(args.model))
     print('Loaded model for eval : ' + args.model)
+
+    if (not os.path.isdir(args.log_dir) and args.save_images) is True:
+        os.mkdir(args.log_dir)
+        print("Images will be saved to " + args.log_dir)
 
 
     model.to('cuda')
