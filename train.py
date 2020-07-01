@@ -80,7 +80,7 @@ def total_variation(flow):
     Du = F.conv2d(u, D, padding = 1)
     Dv = F.conv2d(v, D, padding = 1)
     
-    return torch.cat((Du.sum(dim = 1, keepdim = True), Dv.sum(dim = 1, keepdim = True)), dim = 1)
+    return torch.cat((Du.abs().sum(dim = 1, keepdim = True), Dv.sum(dim = 1, keepdim = True)), dim = 1)
 
 
 def fetch_dataloader(args):
@@ -270,6 +270,7 @@ if __name__ == '__main__':
     parser.add_argument('--image_size', type=int, nargs='+', default=[384, 512])
 
     parser.add_argument('--admm_solver', type=bool, default=False, help='apply admm block')
+    parser.add_argument('--admm_mask',type=bool, default=False)
     parser.add_argument('--admm_lamb', type=float, default=0.4)
     parser.add_argument('--admm_rho', type=float, default=0.4)
     parser.add_argument('--admm_eta', type=float, default=0.4)

@@ -6,20 +6,31 @@ import numpy as np
 from core.modules.ker2mat import Kernel2MatrixConvertor
 
 class ADMMSolverBlock(nn.Module):
-    def __init__(self,shape,rho,lamb,eta):
+    def __init__(self,shape,mask,rho,lamb,eta):
         super(ADMMSolverBlock, self).__init__()
+        
+        self.D = [Dl.cuda() for Dl in Kernel2MatrixConvertor(shape[:2]).D]
+        self.u_solver = ADMMSolverBlockPerChannel(self.D,shape,rho,lamb,eta)
+        self.v_solver = ADMMSolverBlockPerChannel(self.D,shape,rho,lamb,eta)
+        
+        self.use_mask = mask
+        if self.use_mask:
+            self.mask_gen = MaskGenerator(shape,pad=1)
 
-        self.u_solver = ADMMSolverBlockPerChannel(shape,rho,lamb,eta)
-        self.v_solver = ADMMSolverBlockPerChannel(shape,rho,lamb,eta)
+    def forward(self, F, image):
+        #generate mask
+        if self.use_mask:
+            mask = self.mask_gen(image)[:,0,:,:].flatten(start_dim=1).T
+        else:
+            mask = None
 
-    def forward(self, F):
         #reshape flow and seperate into channels
         F_u = torch.flip(F[:,0,:,:], dims=[1]).flatten(start_dim=1).T
         F_v = torch.flip(F[:,1,:,:], dims=[1]).flatten(start_dim=1).T
 
         #treat each channel independently
-        Q_u, _ = self.u_solver(F_u)
-        Q_v, _ = self.v_solver(F_v)
+        Q_u, _ = self.u_solver(F_u, mask)
+        Q_v, _ = self.v_solver(F_v, mask)
 
         #merge 2 channels
         out_H, out_W = F.shape[2], F.shape[3]
@@ -34,10 +45,14 @@ class ADMMSolverBlock(nn.Module):
 
 
 class ADMMSolverBlockPerChannel(nn.Module):
-    def __init__(self,shape,rho,lamb,eta):
+    def __init__(self,D,shape,rho,lamb,eta):
         super(ADMMSolverBlockPerChannel, self).__init__()
+        
+        # initialize filtering matrices
+        self.D = D
 
-        self.Q = ReconstructionBlock(rho)
+        # initialize blocks
+        self.Q = ReconstructionBlock(self.D,rho)
         self.C = ConvolutionBlock()
         self.Z = SoftThresholding(rho,lamb)
         self.M = MultiplierUpdate(eta)
@@ -47,21 +62,19 @@ class ADMMSolverBlockPerChannel(nn.Module):
         self.Beta_hat = [torch.zeros(((shape[0]+padH)*(shape[1]+padW),shape[2]))]*2
         self.Z_hat = [torch.zeros(((shape[0]+padH)*(shape[1]+padW),shape[2]))]*2
 
-        # initialize filtering matrices
-        self.D = [Dl for Dl in Kernel2MatrixConvertor(shape[:2]).D]
 
     
-    def forward(self,F):
+    def forward(self,F, mask=None):
         D = [D_l.cuda() for D_l in self.D]
         Z = [Z_l.cuda() for Z_l in self.Z_hat]
         Beta = [Beta_l.cuda() for Beta_l in self.Beta_hat]
 
         # Reconstruction
-        Q_hat = self.Q(D,F,Z,Beta)
+        Q_hat = self.Q(F,Z,Beta)
         # Convolution
         C_hat = [self.C(Q_hat, D_l, Beta_l) for D_l, Beta_l in zip(D,Beta)]
         # Soft Thresholding
-        Z_hat = [self.Z(C_l) for C_l in C_hat]
+        Z_hat = [self.Z(C_l, mask) for C_l in C_hat]
         # Multipliers Update
         Beta_hat = [self.M(Q_hat, D_l, Z_l, Beta_l) for D_l, Z_l, Beta_l in zip(D,Z,Beta)]
 
@@ -69,25 +82,24 @@ class ADMMSolverBlockPerChannel(nn.Module):
         self.Z_hat = Z_hat
         self.Beta_hat = Beta_hat
 
-        #for D_l, Beta_l in zip(D,Beta):
-        #    C_l = self.C(Q_hat, D_l, Beta_l)
-        #    Z_l = self.Z(C_l)
-        #    Beta_l = self.M(Q_hat, D_l, Z_l, Beta_l)
-
         return Q_hat, (Beta_hat, Z_hat)
 
 
 class ReconstructionBlock(nn.Module):
-    def __init__(self,rho):
+    def __init__(self,D,rho):
         super(ReconstructionBlock, self).__init__()
         self.rho = rho
-    
-    def forward(self,D,F,Z,Beta):
+        self.D = D
+        
+        # calculate inverse matrix once
+        DtD = [Dl.T @ Dl for Dl in self.D]
+        self.B = torch.inverse(torch.eye(DtD[0].shape[0]).cuda() + rho * sum(DtD))
+
+    def forward(self,F,Z,Beta):
         rho = self.rho
 
-        DtD = [Dl.T @ Dl for Dl in D]
-        Dt_ZmBeta = [Dl.T @ (Zl - Beta_l) for Dl,Zl,Beta_l in zip(D,Z,Beta)]
-        Q_hat = torch.inverse(torch.eye(F.shape[0]).cuda() + rho * sum(DtD)) @ (F + rho * sum(Dt_ZmBeta))
+        Dt_ZmBeta = [Dl.cuda().T @ (Zl - Beta_l) for Dl,Zl,Beta_l in zip(self.D,Z,Beta)]
+        Q_hat = self.B.cuda() @ (F + rho * sum(Dt_ZmBeta))
 
         return Q_hat
 
@@ -104,12 +116,19 @@ class ConvolutionBlock(nn.Module):
 class SoftThresholding(nn.Module):
     def __init__(self,rho,lamb):
         super(SoftThresholding, self).__init__()
-        self.th = lamb / rho
+        self.lamb = lamb
+        self.rho = rho
     
-    def forward(self,C_l):
+    def forward(self,C_l, mask):
+        # apply mask
+        if mask is not None:
+            th = mask * self.lamb / self.rho
+        else:
+            th = torch.ones_like(C_l) * self.lamb / self.rho
+
         Z_l = torch.zeros_like(C_l)
-        valid = C_l >= self.th
-        Z_l[valid] = C_l[valid] - self.th * torch.sign(C_l[valid]) 
+        valid = C_l.abs() >= th
+        Z_l[valid] = C_l[valid] - th[valid] * torch.sign(C_l[valid]) 
         
         return Z_l
 
@@ -122,3 +141,24 @@ class MultiplierUpdate(nn.Module):
         Beta_l = Beta_l + self.eta * (D_l @ Q - Z_l)
         
         return Beta_l
+
+class MaskGenerator(nn.Module):
+    def __init__(self,shape,pad=0,learned_mask=False):
+        super(MaskGenerator,self).__init__()
+        self.learned_mask = learned_mask
+        self.pad = pad
+        if not learned_mask:
+            Dx = torch.tensor([[1, 0, -1], [2, 0, -2], [1, 0, -1]], dtype = torch.float).view(1,1,3,3)
+            Dy = torch.tensor([[1, 2, 1], [0, 0, 0], [-1, -2, -1]], dtype = torch.float).view(1,1,3,3)
+            self.D = torch.cat((Dx, Dy), dim = 0)
+
+    def forward(self, image):
+        image = F.interpolate(image, scale_factor=1/8, mode='bilinear')
+        image = F.pad(image,[self.pad, self.pad, self.pad, self.pad])
+        if not self.learned_mask:
+            # use gradient of source image
+            im_gray = (image * torch.tensor([[[[0.2989]],[[0.5870]],[[0.1140]]]], dtype= torch.float).cuda()).sum(dim=1,keepdim=True)
+            grads = F.conv2d(im_gray, self.D.cuda(), padding = 1)
+            mask = torch.sum(grads**2, dim=1, keepdim=True).sqrt()
+            mask = 1 - mask / mask.max()
+        return mask

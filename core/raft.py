@@ -40,7 +40,8 @@ class RAFT(nn.Module):
             self.cnet = BasicEncoder(output_dim=hdim+cdim, norm_fn='batch', dropout=args.dropout)
             self.update_block = BasicUpdateBlock(self.args, hidden_dim=hdim)
         
-        self.admm_block = ADMMSolverBlock(shape=[sh // 8 for sh in args.image_size]+[int(args.batch_size/torch.cuda.device_count())], rho=args.admm_rho, lamb=args.admm_lamb, eta=args.admm_eta)
+        if args.admm_solver:
+            self.admm_block = ADMMSolverBlock(shape=[sh // 8 for sh in args.image_size]+[int(args.batch_size/torch.cuda.device_count())], mask=args.admm_mask, rho=args.admm_rho, lamb=args.admm_lamb, eta=args.admm_eta)
 
     def freeze_bn(self):
         for m in self.modules():
@@ -78,9 +79,6 @@ class RAFT(nn.Module):
         self.update_block.reset_mask(net, inp)
         coords0, coords1 = self.initialize_flow(image1)
 
-        # initialize ADMM values
-        #H = (torch.zeros_like(coords0), torch.zeros_like(coords0)) 
-
         flow_predictions = []
         for itr in range(iters):
             coords1 = coords1.detach()
@@ -94,7 +92,7 @@ class RAFT(nn.Module):
 
             # Apply ADMM Solver
             if self.args.admm_solver == True:
-                Q = self.admm_block(coords1 - coords0)
+                Q = self.admm_block(coords1 - coords0, image1)
                 coords1 = coords0 + Q.type(torch.float32)
             else:
                 Q = coords1 - coords0
