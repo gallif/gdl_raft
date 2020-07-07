@@ -11,6 +11,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 import tensorflow as tf
+from tqdm import tqdm
 
 import torch
 import torch.nn as nn
@@ -24,11 +25,13 @@ from core.raft import RAFT
 from evaluate import validate_sintel, validate_kitti
 import core.datasets as datasets
 from core.utils.flow_viz import flow_to_image
+from core.utils.utils import dump_args_to_text
 
 # exclude extremly large displacements
 MAX_FLOW = 1000
 SUM_FREQ = 100
-VAL_FREQ = 5000
+CHKPT_FREQ = 5000
+EVAL_FREQ = 1000
 
 
 def count_parameters(model):
@@ -102,12 +105,27 @@ def fetch_dataloader(args):
     elif args.dataset == 'kitti':
         train_dataset = datasets.KITTI(args, image_size=args.image_size, is_val=False)
 
+
     gpuargs = {'num_workers': 4, 'drop_last' : True}
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, 
         pin_memory=True, shuffle=True, **gpuargs)
+    
+    if args.run_eval:
+        if args.eval_dataset == 'sintel':
+            valid_dataset = datasets.MpiSintel(args, image_size=args.image_size, dstype='clean', root=args.eval_dir)
+
+        valid_loader = DataLoader(valid_dataset, batch_size=args.batch_size, 
+            pin_memory=True, shuffle=False, **gpuargs)
+    else:
+        valid_dataset = None
+        valid_loader = None
+
 
     print('Training with %d image pairs' % len(train_dataset))
-    return train_loader
+    if args.run_eval:
+        print('Validating with %d image pairs' % len(valid_dataset))
+
+    return train_loader, valid_loader
 
 def fetch_optimizer(args, model):
     """ Create the optimizer and learning rate scheduler """
@@ -151,6 +169,50 @@ class Logger:
         if self.total_steps % SUM_FREQ == SUM_FREQ-1:
             self._print_training_status()
 
+def validate(args,model,valid_loader,tb_logger,step):
+    print('Evaluating...')
+    model.eval()
+    epe_list = []
+    with torch.no_grad():
+        for i_batch, data_blob in tqdm(enumerate(valid_loader)):
+            image1, image2, flow_gt, valid = [x.cuda() for x in data_blob]
+            flow_preds = model(image1, image2, iters=args.eval_iters)
+            # measure epe in batch
+            valid = (valid >= 0.5) & (flow_gt.abs().sum(dim=1) < MAX_FLOW)
+
+            epe = torch.sum((flow_preds[-1] - flow_gt)**2, dim=1).sqrt()
+            epe = epe.view(-1)[valid.view(-1)].mean().item()
+            epe_list.append(epe)
+
+    # Save and print eval results
+    print('Eval Summary - dataset: {} | step: {} | av. epe: {}'.format(args.eval_dataset, step, np.mean(epe)))
+    
+    tb_logger.scalar_summary('Eval EPE', np.mean(epe), step)
+    B = args.batch_size
+
+    # Eval Images vs. Pred vs. GT
+    gt_list = [np.array(x) for x in np.array(flow_gt.detach().cpu()).transpose(0,2,3,1).tolist()]
+    pr_list = [np.array(x) for x in np.array(flow_preds[-1].detach().cpu()).transpose(0,2,3,1).tolist()]
+    gt_list = list(map(flow_to_image, gt_list))
+    pr_list = list(map(flow_to_image, pr_list))
+    tb_logger.image_summary('Eval - src & tgt, pred, gt', 
+        [np.concatenate([np.concatenate([i.squeeze(0), j.squeeze(0)], axis = 1), np.concatenate([k, l], axis = 1)], axis=0) 
+            for i,j,k,l in zip(   np.split(np.array(image1.data.cpu()).astype(np.uint8).transpose(0,2,3,1), B, axis = 0), 
+                                np.split(np.array(image2.data.cpu()).astype(np.uint8).transpose(0,2,3,1), B, axis = 0),
+                                gt_list,
+                                pr_list)
+        ], 
+        step)
+
+    # Eval Error
+    pred_batch = [np.array(x) for x in np.array(flow_preds[-1].detach().cpu()).transpose(0,2,3,1).tolist()]
+    gt_batch = [np.array(x) for x in np.array(flow_gt.detach().cpu()).transpose(0,2,3,1).tolist()]
+    err_batch = [(np.sum(np.abs(pr - gt)**2, axis=2,keepdims=True)**0.5).astype(np.uint8) for pr,gt in zip(pred_batch, gt_batch)]
+    err_vis = [np.concatenate([gt, pr, np.tile(err,(1,1,3))], axis=0) for gt, pr, err in zip(gt_list, pr_list,err_batch )]
+    tb_logger.image_summary(f'Eval - Error', err_vis, step)
+
+    return
+
 
 def train(args):
 
@@ -162,12 +224,11 @@ def train(args):
         model.load_state_dict(torch.load(args.restore_ckpt))
 
     model.cuda()
-    model.train()
     
     if 'chairs' not in args.dataset:
         model.module.freeze_bn()
 
-    train_loader = fetch_dataloader(args)
+    train_loader, valid_loader = fetch_dataloader(args)
     optimizer, scheduler = fetch_optimizer(args, model)
 
     total_steps = args.initial_step
@@ -179,7 +240,7 @@ def train(args):
 
         for i_batch, data_blob in enumerate(train_loader):
             image1, image2, flow, valid = [x.cuda() for x in data_blob]
-
+            model.train()
             optimizer.zero_grad()
             flow_predictions = model(image1, image2, iters=args.iters)
             
@@ -202,38 +263,34 @@ def train(args):
 
                 # Image Summaries
                 # ============================================================
-                B = args.batch_size
-                """
-                vis_batch = []
-                for b in range(B):
-                    batch = [np.array(fl_pred[b].detach().squeeze(0).cpu()).transpose(1,2,0) for fl_pred in flow_predictions]
-                    vis = batch + [flow[b].detach().cpu().numpy().transpose(1,2,0)]
-                    vis = np.concatenate(list(map(flow_to_image, vis)), axis = 1)
-                    vis_batch.append(vis)
-                tb_logger.image_summary(f'flow', vis_batch, total_steps)
-                """
-                # Images vs. Pred vs. GT
-                gt_list = [np.array(x) for x in np.array(flow.detach().cpu()).transpose(0,2,3,1).tolist()]
-                pr_list = [np.array(x) for x in np.array(flow_predictions[-1].detach().cpu()).transpose(0,2,3,1).tolist()]
-                gt_list = list(map(flow_to_image, gt_list))
-                pr_list = list(map(flow_to_image, pr_list))
-                tb_logger.image_summary('src & tgt, pred, gt', 
-                    [np.concatenate([np.concatenate([i.squeeze(0), j.squeeze(0)], axis = 1), np.concatenate([k, l], axis = 1)], axis=0) 
-                        for i,j,k,l in zip(   np.split(np.array(image1.data.cpu()).astype(np.uint8).transpose(0,2,3,1), B, axis = 0), 
-                                            np.split(np.array(image2.data.cpu()).astype(np.uint8).transpose(0,2,3,1), B, axis = 0),
-                                            gt_list,
-                                            pr_list)
-                    ], 
-                    total_steps)
+                if not args.run_eval:
+                    B = args.batch_size
 
-                # Error
-                pred_batch = [np.array(x) for x in np.array(flow_predictions[-1].detach().cpu()).transpose(0,2,3,1).tolist()]
-                gt_batch = [np.array(x) for x in np.array(flow.detach().cpu()).transpose(0,2,3,1).tolist()]
-                err_batch = [(np.sum(np.abs(pr - gt)**2, axis=2,keepdims=True)**0.5).astype(np.uint8) for pr,gt in zip(pred_batch, gt_batch)]
-                err_vis = [np.concatenate([gt, pr, np.tile(err,(1,1,3))], axis=0) for gt, pr, err in zip(gt_list, pr_list,err_batch )]
-                tb_logger.image_summary(f'Error', err_vis, total_steps)
+                    # Images vs. Pred vs. GT
+                    gt_list = [np.array(x) for x in np.array(flow.detach().cpu()).transpose(0,2,3,1).tolist()]
+                    pr_list = [np.array(x) for x in np.array(flow_predictions[-1].detach().cpu()).transpose(0,2,3,1).tolist()]
+                    gt_list = list(map(flow_to_image, gt_list))
+                    pr_list = list(map(flow_to_image, pr_list))
+                    tb_logger.image_summary('src & tgt, pred, gt', 
+                        [np.concatenate([np.concatenate([i.squeeze(0), j.squeeze(0)], axis = 1), np.concatenate([k, l], axis = 1)], axis=0) 
+                            for i,j,k,l in zip(   np.split(np.array(image1.data.cpu()).astype(np.uint8).transpose(0,2,3,1), B, axis = 0), 
+                                                np.split(np.array(image2.data.cpu()).astype(np.uint8).transpose(0,2,3,1), B, axis = 0),
+                                                gt_list,
+                                                pr_list)
+                        ], 
+                        total_steps)
 
-            if (total_steps % VAL_FREQ == VAL_FREQ-1 and args.save_checkpoints) is True:
+                    # Error
+                    pred_batch = [np.array(x) for x in np.array(flow_predictions[-1].detach().cpu()).transpose(0,2,3,1).tolist()]
+                    gt_batch = [np.array(x) for x in np.array(flow.detach().cpu()).transpose(0,2,3,1).tolist()]
+                    err_batch = [(np.sum(np.abs(pr - gt)**2, axis=2,keepdims=True)**0.5).astype(np.uint8) for pr,gt in zip(pred_batch, gt_batch)]
+                    err_vis = [np.concatenate([gt, pr, np.tile(err,(1,1,3))], axis=0) for gt, pr, err in zip(gt_list, pr_list,err_batch )]
+                    tb_logger.image_summary(f'Error', err_vis, total_steps)
+            
+            if total_steps % EVAL_FREQ == EVAL_FREQ-1 and args.run_eval:
+                validate(args,model,valid_loader,tb_logger,total_steps)
+
+            if (total_steps % CHKPT_FREQ == CHKPT_FREQ-1 and args.save_checkpoints) is True:
                 PATH = args.log_dir + '/%d_%s.pth' % (total_steps+1, args.name)
                 torch.save(model.state_dict(), PATH)
 
@@ -256,8 +313,13 @@ if __name__ == '__main__':
     parser.add_argument('--data_dir', help='path to dataset')
     parser.add_argument('--restore_ckpt', help="restore checkpoint")
     parser.add_argument('--small', action='store_true', help='use small model')
-    parser.add_argument('--save_checkpoints', default=True, help='save checkpoints during training')
+    parser.add_argument('--save_checkpoints', action='store_true', help='save checkpoints during training')
     parser.add_argument('--log_dir', default = os.path.join(os.getcwd(), 'checkpoints', datetime.now().strftime('%Y%m%d-%H%M%S')))
+
+    parser.add_argument('--run_eval', action='store_true')
+    parser.add_argument('--eval_dataset', help='which dataset to use for eval')
+    parser.add_argument('--eval_dir', help='path to eval dataset')
+    parser.add_argument('--eval_iters',type=int, default=12)
 
     parser.add_argument('--lr', type=float, default=0.00002)
     parser.add_argument('--pct_start', type=float, default=0.2)
@@ -269,8 +331,8 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=6)
     parser.add_argument('--image_size', type=int, nargs='+', default=[384, 512])
 
-    parser.add_argument('--admm_solver', type=bool, default=False, help='apply admm block')
-    parser.add_argument('--admm_mask',type=bool, default=False)
+    parser.add_argument('--admm_solver', action='store_true', help='apply admm block')
+    parser.add_argument('--admm_mask', action='store_true', help='apply mask within admm block')
     parser.add_argument('--admm_lamb', type=float, default=0.4)
     parser.add_argument('--admm_rho', type=float, default=0.4)
     parser.add_argument('--admm_eta', type=float, default=0.4)
@@ -285,14 +347,16 @@ if __name__ == '__main__':
     torch.manual_seed(1234)
     np.random.seed(1234)
 
-    if (not os.path.isdir(args.log_dir) and args.save_checkpoints) is True:
-        os.mkdir(args.log_dir)
-        print("Checkpoints will be saved to " + args.log_dir)
-
     # scale learning rate and batch size by number of GPUs
     os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda_devices
     num_gpus = torch.cuda.device_count()
     args.batch_size = args.batch_size * num_gpus
     args.lr = args.lr * num_gpus
+    args.num_gpus = num_gpus
+
+    if (not os.path.isdir(args.log_dir) and args.save_checkpoints) is True:
+        os.mkdir(args.log_dir)
+        print("Checkpoints will be saved to " + args.log_dir)
+        dump_args_to_text(args, args.log_dir)
 
     train(args)

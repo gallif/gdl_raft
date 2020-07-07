@@ -122,15 +122,26 @@ if __name__ == '__main__':
     parser.add_argument('--kitti_iters', type=int, default=32)
     parser.add_argument('--dataset', help='dataset used for eval')
     parser.add_argument('--data_dir', help='path to dataset')
-    parser.add_argument('--admm_solver', type=bool, default=False)
     parser.add_argument('--cuda_devices', default="0,1", help="choose which GPUs are available")
-    parser.add_argument('--save_images', type=bool, default=False)
-
-
+    parser.add_argument('--save_images', action='store_true', help='dump images during evaluation')
+    parser.add_argument('--batch_size', type=int, default=1)
+    
+    parser.add_argument('--admm_solver', action='store_true', help='apply admm block')
+    parser.add_argument('--admm_mask',action='store_true', help='apply mask within admm block')
+    parser.add_argument('--admm_lamb', type=float, default=0.4)
+    parser.add_argument('--admm_rho', type=float, default=0.4)
+    parser.add_argument('--admm_eta', type=float, default=0.4)
 
     args = parser.parse_args()
     args.log_dir = os.path.join(os.getcwd(), 'out', args.name)
     os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda_devices
+
+    if args.dataset == 'sintel':
+        args.image_size = [440, 1024]
+
+    print('----Script Args----')
+    for arg in vars(args):
+        print('{} : {}'.format(arg, getattr(args, arg)))
 
     model = RAFT(args)
     model = torch.nn.DataParallel(model)

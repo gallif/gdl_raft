@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 from scipy import interpolate
+import os
 
 
 def bilinear_sampler(img, coords, mode='bilinear', mask=False):
@@ -60,3 +61,14 @@ def coords_grid(batch, ht, wd):
 def upflow8(flow, mode='bilinear'):
     new_size = (8 * flow.shape[2], 8 * flow.shape[3])
     return  8 * F.interpolate(flow, size=new_size, mode=mode, align_corners=True)
+
+def dump_args_to_text(args,log_dir):
+    args_dict = vars(args)
+    print('----Script Args----')
+    with open(os.path.join(log_dir,'args.txt'),'w') as f:
+        for arg in args_dict:
+            st = '{} : {}'.format(arg, getattr(args, arg))
+            f.write(st + '\n')
+            print(st)
+    return
+

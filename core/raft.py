@@ -41,7 +41,7 @@ class RAFT(nn.Module):
             self.update_block = BasicUpdateBlock(self.args, hidden_dim=hdim)
         
         if args.admm_solver:
-            self.admm_block = ADMMSolverBlock(shape=[sh // 8 for sh in args.image_size]+[int(args.batch_size/torch.cuda.device_count())], mask=args.admm_mask, rho=args.admm_rho, lamb=args.admm_lamb, eta=args.admm_eta)
+            self.admm_block = ADMMSolverBlock(shape=[sh // 8 for sh in args.image_size]+[int(np.ceil(args.batch_size/torch.cuda.device_count()))], mask=args.admm_mask, rho=args.admm_rho, lamb=args.admm_lamb, eta=args.admm_eta)
 
     def freeze_bn(self):
         for m in self.modules():

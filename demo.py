@@ -47,7 +47,7 @@ def display(image1, image2, flow, flow_gt, name):
     im2save = np.concatenate([image1, image2, flow_image, flow_gt_image], axis = 1)
     error = np.sum(np.abs(flow - flow_gt)**2, axis=2)**0.5
     Image.fromarray((im2save*255).astype(np.uint8)).save(name)
-    plt.figure(), plt.imshow(error, cmap='gray'), plt.colorbar(), plt.savefig(name.replace(".png","_error.png"),bbox_inches='tight')
+    plt.imshow(error, cmap='gray'), plt.colorbar(), plt.savefig(name.replace(".png","_error.png"),bbox_inches='tight')
 
 
 

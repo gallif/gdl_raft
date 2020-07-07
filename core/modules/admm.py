@@ -15,6 +15,7 @@ class ADMMSolverBlock(nn.Module):
         
         self.use_mask = mask
         if self.use_mask:
+            print('mask is enabled')
             self.mask_gen = MaskGenerator(shape,pad=1)
 
     def forward(self, F, image):
@@ -159,6 +160,5 @@ class MaskGenerator(nn.Module):
             # use gradient of source image
             im_gray = (image * torch.tensor([[[[0.2989]],[[0.5870]],[[0.1140]]]], dtype= torch.float).cuda()).sum(dim=1,keepdim=True)
             grads = F.conv2d(im_gray, self.D.cuda(), padding = 1)
-            mask = torch.sum(grads**2, dim=1, keepdim=True).sqrt()
-            mask = 1 - mask / mask.max()
+            mask = torch.exp(-torch.sum(grads**2, dim=1, keepdim=True).sqrt()) 
         return mask
