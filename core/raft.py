@@ -80,6 +80,8 @@ class RAFT(nn.Module):
         coords0, coords1 = self.initialize_flow(image1)
 
         flow_predictions = []
+        flow_pre_admm = []
+        dlta_flows = []
         for itr in range(iters):
             coords1 = coords1.detach()
             corr = corr_fn(coords1) # index correlation volume
@@ -92,6 +94,7 @@ class RAFT(nn.Module):
 
             # Apply ADMM Solver
             if self.args.admm_solver == True:
+                flow_pre_admm.append(upflow8(coords1 - coords0))
                 Q = self.admm_block(coords1 - coords0, image1)
                 coords1 = coords0 + Q.type(torch.float32)
             else:
@@ -100,10 +103,13 @@ class RAFT(nn.Module):
             if upsample:
                 flow_up = upflow8(Q)
                 flow_predictions.append(flow_up)
+                dlta_flows.append(upflow8(delta_flow))
             
             else:
                 flow_predictions.append(Q)
+                dlta_flows.append(delta_flow)
 
-        return flow_predictions
+
+        return flow_predictions, flow_pre_admm, dlta_flows
 
 

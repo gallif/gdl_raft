@@ -8,7 +8,10 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from PIL import Image
-import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('Agg')
+from matplotlib import pyplot as plt
+
 
 import datasets
 from utils import flow_viz
@@ -35,8 +38,8 @@ def load_image(imfile):
 
 
 def display(image1, image2, flow, flow_gt, name):
-    image1 = image1.permute(1, 2, 0).cpu().numpy() / 255.0
-    image2 = image2.permute(1, 2, 0).cpu().numpy() / 255.0
+    image1 = image1.permute(1, 2, 0).cpu().numpy()
+    image2 = image2.permute(1, 2, 0).cpu().numpy()
 
     flow = flow.permute(1, 2, 0).cpu().numpy()
     flow_image = flow_viz.flow_to_image(flow)
@@ -46,8 +49,26 @@ def display(image1, image2, flow, flow_gt, name):
 
     im2save = np.concatenate([image1, image2, flow_image, flow_gt_image], axis = 1)
     error = np.sum(np.abs(flow - flow_gt)**2, axis=2)**0.5
-    Image.fromarray((im2save*255).astype(np.uint8)).save(name)
-    plt.imshow(error, cmap='gray'), plt.colorbar(), plt.savefig(name.replace(".png","_error.png"),bbox_inches='tight')
+    Image.fromarray((im2save).astype(np.uint8)).save(name)
+    plt.figure(), plt.imshow(error, cmap='gray'), plt.colorbar(), plt.savefig(name.replace(".png","_error.png"),bbox_inches='tight')
+
+def display_flow_iterations(flow_list,name):
+    if len(flow_list) > 0:
+        flow_list = [f[0,:,:,:].permute(1, 2, 0).cpu().numpy() for f in flow_list]
+        flow_list = list(map(flow_viz.flow_to_image, flow_list))
+        flow_image = np.concatenate(flow_list, axis=1)
+        Image.fromarray((flow_image).astype(np.uint8)).save(name)
+
+def display_delta_flow_norms(dlta_flow_list,name):
+    if len(dlta_flow_list) > 0:
+        norms = [(f**2).sum(dim=1).sqrt().mean() for f in dlta_flow_list]
+        plt.figure(), plt.semilogy(range(len(dlta_flow_list)), norms), plt.savefig(name, bbox_inches='tight')
+
+
+
+
+    
+
 
 
 

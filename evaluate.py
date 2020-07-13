@@ -15,7 +15,8 @@ from tqdm import tqdm
 import core.datasets as datasets
 from core.utils import flow_viz
 from core.raft import RAFT
-from demo import display
+from demo import display, display_flow_iterations, display_delta_flow_norms
+from train import total_variation
 
 SAVE_FREQ = 50
 
@@ -53,6 +54,8 @@ def validate_sintel(args, model, iters=50):
         val_dataset = datasets.MpiSintel(args, do_augument=False, dstype=dstype)
         
         epe_list = []
+        tv_list = []
+
         for i in tqdm(range(len(val_dataset))):
             image1, image2, flow_gt, _ = val_dataset[i]
             image1 = image1[None].cuda()
@@ -61,20 +64,23 @@ def validate_sintel(args, model, iters=50):
             image2 = F.pad(image2, [0, 0, pad, pad], mode='replicate')
 
             with torch.no_grad():
-                flow_predictions = model.module(image1, image2, iters=iters)
+                flow_predictions, flow_pre_admm, dlta_flows = model.module(image1, image2, iters=iters)
                 flow_pr = flow_predictions[-1][0,:,pad:-pad]
 
             epe = torch.sum((flow_pr - flow_gt.cuda())**2, dim=0)
             epe = torch.sqrt(epe).mean()
+            tv = total_variation(flow_pr[None])
             epe_list.append(epe.item())
+            tv_list.append(tv.sum(dim=1).mean().item())
 
             if args.save_images and i % SAVE_FREQ == 0:
-                display(image1[0,:,pad:-pad], image2[0,:,pad:-pad], flow_pr, flow_gt, os.path.join(args.log_dir, dstype + "_{}.png".format(i)))
+                display(image1[0,:,pad:-pad], image2[0,:,pad:-pad], flow_pr, flow_gt, os.path.join(args.log_dir, dstype + "_{}__epe_{:.2f}__tv_{:.2f}.png".format(i,epe.item(),tv.sum(dim=1).mean().item())))
+                #display_flow_iterations(flow_predictions, os.path.join(args.log_dir, dstype + "_{}_flows.png".format(i)))
+                #display_flow_iterations(flow_pre_admm, os.path.join(args.log_dir, dstype + "_{}_pre_admm.png".format(i)))
+                #display_flow_iterations(dlta_flows, os.path.join(args.log_dir, dstype + "_{}_dlta_flows.png".format(i)))
+                #display_delta_flow_norms(dlta_flows, os.path.join(args.log_dir, dstype + "_{}_norms.png".format(i)))
 
-
-
-
-        print("Validation (%s) EPE: %f" % (dstype, np.mean(epe_list)))
+        print("Validation (%s) EPE: %.2f  TV: %.2f" % (dstype, np.mean(epe_list), np.mean(tv_list)))
 
 
 def validate_kitti(args, model, iters=32):

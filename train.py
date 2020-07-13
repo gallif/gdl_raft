@@ -22,7 +22,6 @@ from logger import TBLogger
 from pathlib import Path
 from torch.utils.data import DataLoader
 from core.raft import RAFT
-from evaluate import validate_sintel, validate_kitti
 import core.datasets as datasets
 from core.utils.flow_viz import flow_to_image
 from core.utils.utils import dump_args_to_text
@@ -115,7 +114,7 @@ def fetch_dataloader(args):
             valid_dataset = datasets.MpiSintel(args, image_size=args.image_size, dstype='clean', root=args.eval_dir)
 
         valid_loader = DataLoader(valid_dataset, batch_size=args.batch_size, 
-            pin_memory=True, shuffle=False, **gpuargs)
+            pin_memory=True, shuffle=True, **gpuargs)
     else:
         valid_dataset = None
         valid_loader = None
@@ -185,9 +184,9 @@ def validate(args,model,valid_loader,tb_logger,step):
             epe_list.append(epe)
 
     # Save and print eval results
-    print('Eval Summary - dataset: {} | step: {} | av. epe: {}'.format(args.eval_dataset, step, np.mean(epe)))
+    print('Eval Summary - dataset: {} | step: {} | av. epe: {}'.format(args.eval_dataset, step, np.mean(epe_list)))
     
-    tb_logger.scalar_summary('Eval EPE', np.mean(epe), step)
+    tb_logger.scalar_summary('Eval EPE', np.mean(epe_list), step)
     B = args.batch_size
 
     # Eval Images vs. Pred vs. GT
@@ -317,7 +316,7 @@ if __name__ == '__main__':
     parser.add_argument('--log_dir', default = os.path.join(os.getcwd(), 'checkpoints', datetime.now().strftime('%Y%m%d-%H%M%S')))
 
     parser.add_argument('--run_eval', action='store_true')
-    parser.add_argument('--eval_dataset', help='which dataset to use for eval')
+    parser.add_argument('--eval_dataset', default='sintel', help='which dataset to use for eval')
     parser.add_argument('--eval_dir', help='path to eval dataset')
     parser.add_argument('--eval_iters',type=int, default=12)
 
