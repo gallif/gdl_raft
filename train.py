@@ -36,6 +36,44 @@ EVAL_FREQ = 1000
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
+def triplet_sequence_loss(flow_preds, q_preds, flow_gt, valid, sup_loss = 'l1', q_weight = 0.0):
+    """ Loss function defined over sequence of flow predictions """
+
+    n_predictions = len(flow_preds)    
+    flow_loss = 0.0
+
+    # exlude invalid pixels and extremely large diplacements
+    valid = (valid >= 0.5) & (flow_gt.abs().sum(dim=1) < MAX_FLOW)
+
+    for i in range(n_predictions):
+        i_weight = 0.8**(n_predictions - i - 1)
+        
+        if sup_loss == 'l1':
+            i_loss = (flow_preds[i] - flow_gt).abs()
+        elif sup_loss == 'l2':
+            i_loss = (flow_preds[i] - flow_gt)**2
+        
+        if q_weight > 0.0:
+            i_reg = q_weight * (flow_preds[i] - q_preds[i])**2
+        else:
+            i_reg = 0.0
+
+        flow_loss += i_weight * (valid[:, None] * (i_loss + i_reg)).mean()
+
+    epe = torch.sum((flow_preds[-1] - flow_gt)**2, dim=1).sqrt()
+    epe = epe.view(-1)[valid.view(-1)]
+
+    metrics = {
+        'loss': flow_loss.item(),
+        'epe':  epe.mean().item(),
+        '1px':  (epe < 1).float().mean().item(),
+        '3px':  (epe < 3).float().mean().item(),
+        '5px':  (epe < 5).float().mean().item(),
+    }
+
+    return flow_loss, metrics
+
+
 def sequence_loss(flow_preds, flow_gt, valid, sup_loss = 'l1', tv_weight = 0.0):
     """ Loss function defined over sequence of flow predictions """
 
@@ -331,6 +369,7 @@ if __name__ == '__main__':
     parser.add_argument('--image_size', type=int, nargs='+', default=[384, 512])
 
     parser.add_argument('--admm_solver', action='store_true', help='apply admm block')
+    parser.add_argument('--admm_iters',type=int,default=1)
     parser.add_argument('--admm_mask', action='store_true', help='apply mask within admm block')
     parser.add_argument('--admm_lamb', type=float, default=0.4)
     parser.add_argument('--admm_rho', type=float, default=0.4)

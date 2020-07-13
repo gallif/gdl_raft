@@ -6,9 +6,10 @@ import numpy as np
 from core.modules.ker2mat import Kernel2MatrixConvertor
 
 class ADMMSolverBlock(nn.Module):
-    def __init__(self,shape,mask,rho,lamb,eta):
+    def __init__(self,shape,mask,rho,lamb,eta,T=1):
         super(ADMMSolverBlock, self).__init__()
         
+        self.T = T
         self.D = [Dl.cuda() for Dl in Kernel2MatrixConvertor(shape[:2]).D]
         self.u_solver = ADMMSolverBlockPerChannel(self.D,shape,rho,lamb,eta)
         self.v_solver = ADMMSolverBlockPerChannel(self.D,shape,rho,lamb,eta)
@@ -30,8 +31,13 @@ class ADMMSolverBlock(nn.Module):
         F_v = torch.flip(F[:,1,:,:], dims=[1]).flatten(start_dim=1).T
 
         #treat each channel independently
-        Q_u, _ = self.u_solver(F_u, mask)
-        Q_v, _ = self.v_solver(F_v, mask)
+        self.u_solver.reset()
+        self.v_solver.reset()
+        for t in range(self.T):
+            Q_u, _ = self.u_solver(F_u, mask)
+            Q_v, _ = self.v_solver(F_v, mask)
+            #update
+            F_u,F_v = Q_u,Q_v
 
         #merge 2 channels
         out_H, out_W = F.shape[2], F.shape[3]
@@ -46,7 +52,7 @@ class ADMMSolverBlock(nn.Module):
 
 
 class ADMMSolverBlockPerChannel(nn.Module):
-    def __init__(self,D,shape,rho,lamb,eta):
+    def __init__(self,D,shape,rho,lamb,eta,pad=2):
         super(ADMMSolverBlockPerChannel, self).__init__()
         
         # initialize filtering matrices
@@ -59,12 +65,11 @@ class ADMMSolverBlockPerChannel(nn.Module):
         self.M = MultiplierUpdate(eta)
 
         # initialize with zeros
-        padH, padW = 3-1, 3-1
-        self.Beta_hat = [torch.zeros(((shape[0]+padH)*(shape[1]+padW),shape[2]))]*2
-        self.Z_hat = [torch.zeros(((shape[0]+padH)*(shape[1]+padW),shape[2]))]*2
+        self.shape = shape
+        self.pad = pad
+        self.Beta_hat = None
+        self.Z_hat = None
 
-
-    
     def forward(self,F, mask=None):
         D = [D_l.cuda() for D_l in self.D]
         Z = [Z_l.cuda() for Z_l in self.Z_hat]
@@ -84,6 +89,15 @@ class ADMMSolverBlockPerChannel(nn.Module):
         self.Beta_hat = Beta_hat
 
         return Q_hat, (Beta_hat, Z_hat)
+    
+    def reset(self):
+        pad = self.pad
+        shape = self.shape
+        self.Beta_hat = [torch.zeros(((shape[0]+pad)*(shape[1]+pad),shape[2]))]*2
+        self.Z_hat = [torch.zeros(((shape[0]+pad)*(shape[1]+pad),shape[2]))]*2
+        
+        return
+
 
 
 class ReconstructionBlock(nn.Module):
@@ -154,8 +168,9 @@ class MaskGenerator(nn.Module):
             self.D = torch.cat((Dx, Dy), dim = 0)
 
     def forward(self, image):
+        image = (image + 1) / 2 # shift (-1,1) to (0,1)
         image = F.interpolate(image, scale_factor=1/8, mode='bilinear')
-        image = F.pad(image,[self.pad, self.pad, self.pad, self.pad])
+        #image = F.pad(image,[self.pad, self.pad, self.pad, self.pad])
         if not self.learned_mask:
             # use gradient of source image
             im_gray = (image * torch.tensor([[[[0.2989]],[[0.5870]],[[0.1140]]]], dtype= torch.float).cuda()).sum(dim=1,keepdim=True)

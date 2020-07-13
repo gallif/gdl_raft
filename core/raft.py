@@ -41,7 +41,8 @@ class RAFT(nn.Module):
             self.update_block = BasicUpdateBlock(self.args, hidden_dim=hdim)
         
         if args.admm_solver:
-            self.admm_block = ADMMSolverBlock(shape=[sh // 8 for sh in args.image_size]+[int(np.ceil(args.batch_size/torch.cuda.device_count()))], mask=args.admm_mask, rho=args.admm_rho, lamb=args.admm_lamb, eta=args.admm_eta)
+            self.admm_block = ADMMSolverBlock(shape=[sh // 8 for sh in args.image_size]+[int(np.ceil(args.batch_size/torch.cuda.device_count()))], 
+                mask=args.admm_mask, rho=args.admm_rho, lamb=args.admm_lamb, eta=args.admm_eta, T=args.admm_iters)
 
     def freeze_bn(self):
         for m in self.modules():
@@ -80,7 +81,7 @@ class RAFT(nn.Module):
         coords0, coords1 = self.initialize_flow(image1)
 
         flow_predictions = []
-        flow_pre_admm = []
+        q_predictions = []
         dlta_flows = []
         for itr in range(iters):
             coords1 = coords1.detach()
@@ -93,23 +94,25 @@ class RAFT(nn.Module):
             coords1 = coords1 + delta_flow
 
             # Apply ADMM Solver
-            if self.args.admm_solver == True:
-                flow_pre_admm.append(upflow8(coords1 - coords0))
-                Q = self.admm_block(coords1 - coords0, image1)
-                coords1 = coords0 + Q.type(torch.float32)
+            F = coords1 - coords0
+
+            if self.args.admm_solver:
+                Q = self.admm_block(F, image1)
+                #coords1 = coords0 + Q
             else:
-                Q = coords1 - coords0
+                Q = F
 
             if upsample:
-                flow_up = upflow8(Q)
-                flow_predictions.append(flow_up)
+                flow_predictions.append(upflow8(Q))
+                q_predictions.append(upflow8(Q))
                 dlta_flows.append(upflow8(delta_flow))
             
             else:
-                flow_predictions.append(Q)
+                flow_predictions.append(F)
+                q_predictions.append(Q)
                 dlta_flows.append(delta_flow)
 
 
-        return flow_predictions, flow_pre_admm, dlta_flows
+        return flow_predictions, q_predictions, dlta_flows
 
 
