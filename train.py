@@ -36,7 +36,7 @@ EVAL_FREQ = 1000
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-def triplet_sequence_loss(flow_preds, q_preds, flow_gt, valid, sup_loss = 'l1', q_weight = 0.0):
+def triplet_sequence_loss(flow_preds, q_preds, flow_gt, valid, fidelity_func = 'l1', q_weight = 0.0):
     """ Loss function defined over sequence of flow predictions """
 
     n_predictions = len(flow_preds)    
@@ -48,9 +48,9 @@ def triplet_sequence_loss(flow_preds, q_preds, flow_gt, valid, sup_loss = 'l1', 
     for i in range(n_predictions):
         i_weight = 0.8**(n_predictions - i - 1)
         
-        if sup_loss == 'l1':
+        if fidelity_func == 'l1':
             i_loss = (flow_preds[i] - flow_gt).abs()
-        elif sup_loss == 'l2':
+        elif fidelity_func == 'l2':
             i_loss = (flow_preds[i] - flow_gt)**2
         
         if q_weight > 0.0:
@@ -61,11 +61,15 @@ def triplet_sequence_loss(flow_preds, q_preds, flow_gt, valid, sup_loss = 'l1', 
         flow_loss += i_weight * (valid[:, None] * (i_loss + i_reg)).mean()
 
     epe = torch.sum((flow_preds[-1] - flow_gt)**2, dim=1).sqrt()
+    reg = torch.sum((flow_preds[-1] - q_preds[-1])**2, dim=1).sqrt()
     epe = epe.view(-1)[valid.view(-1)]
+    reg = reg.view(-1)[valid.view(-1)]
+
 
     metrics = {
         'loss': flow_loss.item(),
         'epe':  epe.mean().item(),
+        'reg':  reg.mean().item(),
         '1px':  (epe < 1).float().mean().item(),
         '3px':  (epe < 3).float().mean().item(),
         '5px':  (epe < 5).float().mean().item(),
@@ -279,16 +283,22 @@ def train(args):
             image1, image2, flow, valid = [x.cuda() for x in data_blob]
             model.train()
             optimizer.zero_grad()
-            flow_predictions = model(image1, image2, iters=args.iters)
             
-            loss, metrics = sequence_loss(flow_predictions, flow, valid, sup_loss=args.sup_loss, tv_weight = args.tv_weight)
-            loss.backward()
+            # forward
+            flow_predictions, q_predictions, _ = model(image1, image2, iters=args.iters)
+            
+            # loss function
+            if args.loss_func == 'sequence':
+                loss, metrics = sequence_loss(flow_predictions, flow, valid, sup_loss=args.sup_loss, tv_weight = args.tv_weight)
+            elif args.loss_func == 'triplet':
+                loss, metrics = triplet_sequence_loss(flow_predictions, q_predictions, flow, valid, fidelity_func=args.sup_loss, q_weight = args.q_weight)
 
+            # backward
+            loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
             optimizer.step()
             scheduler.step()
             total_steps += 1
-
             logger.push(metrics)
 
             if total_steps % SUM_FREQ == SUM_FREQ-1:
@@ -362,6 +372,8 @@ if __name__ == '__main__':
     parser.add_argument('--pct_start', type=float, default=0.2)
     parser.add_argument('--final_div_factor', type=float, default=1.0)
     parser.add_argument('--sup_loss', help='supervised loss term', default='l1')
+    parser.add_argument('--loss_func', default='sequence')
+    parser.add_argument('--q_weight', type=float, help='total variation term weight', default=0.4)
     parser.add_argument('--tv_weight', type=float, help='total variation term weight', default=0.0)
     parser.add_argument('--num_steps', type=int, default=100000)
     parser.add_argument('--initial_step', type=int, default=0)

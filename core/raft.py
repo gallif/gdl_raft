@@ -98,12 +98,11 @@ class RAFT(nn.Module):
 
             if self.args.admm_solver:
                 Q = self.admm_block(F, image1)
-                #coords1 = coords0 + Q
             else:
                 Q = F
-
+            
             if upsample:
-                flow_predictions.append(upflow8(Q))
+                flow_predictions.append(upflow8(F))
                 q_predictions.append(upflow8(Q))
                 dlta_flows.append(upflow8(delta_flow))
             

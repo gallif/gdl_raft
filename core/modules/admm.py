@@ -33,11 +33,9 @@ class ADMMSolverBlock(nn.Module):
         #treat each channel independently
         self.u_solver.reset()
         self.v_solver.reset()
-        for t in range(self.T):
+        for t in range(self.T+1):
             Q_u, _ = self.u_solver(F_u, mask)
             Q_v, _ = self.v_solver(F_v, mask)
-            #update
-            F_u,F_v = Q_u,Q_v
 
         #merge 2 channels
         out_H, out_W = F.shape[2], F.shape[3]
