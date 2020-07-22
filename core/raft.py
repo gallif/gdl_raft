@@ -3,7 +3,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from core.modules.admm import ADMMSolverBlock
+#from core.modules.admm import ADMMSolverBlock
+from core.modules.admm_v1_1 import ADMMSolverBlock
 from core.modules.update import BasicUpdateBlock, SmallUpdateBlock
 from core.modules.extractor import BasicEncoder, SmallEncoder
 from core.modules.corr import CorrBlock
@@ -41,8 +42,10 @@ class RAFT(nn.Module):
             self.update_block = BasicUpdateBlock(self.args, hidden_dim=hdim)
         
         if args.admm_solver:
-            self.admm_block = ADMMSolverBlock(shape=[sh // 8 for sh in args.image_size]+[int(np.ceil(args.batch_size/torch.cuda.device_count()))], 
-                mask=args.admm_mask, rho=args.admm_rho, lamb=args.admm_lamb, eta=args.admm_eta, T=args.admm_iters)
+            #self.admm_block = ADMMSolverBlock(shape=[sh // 8 for sh in args.image_size]+[int(np.ceil(args.batch_size/torch.cuda.device_count()))], 
+            #    mask=args.admm_mask, rho=args.admm_rho, lamb=args.admm_lamb, eta=args.admm_eta, T=args.admm_iters)
+            self.admm_block = ADMMSolverBlock(mask=args.admm_mask, rho=args.admm_rho, 
+                lamb=args.admm_lamb, learn_lamb=args.learn_lamb, eta=args.admm_eta, learn_eta=args.learn_eta, T=args.admm_iters)
 
     def freeze_bn(self):
         for m in self.modules():
@@ -81,8 +84,10 @@ class RAFT(nn.Module):
         coords0, coords1 = self.initialize_flow(image1)
 
         flow_predictions = []
-        q_predictions = []
         dlta_flows = []
+        q = []
+        c = []
+        betas = []
         for itr in range(iters):
             coords1 = coords1.detach()
             corr = corr_fn(coords1) # index correlation volume
@@ -96,22 +101,19 @@ class RAFT(nn.Module):
             # Apply ADMM Solver
             F = coords1 - coords0
 
-            if self.args.admm_solver:
-                Q = self.admm_block(F, image1)
-            else:
-                Q = F
-            
             if upsample:
                 flow_predictions.append(upflow8(F))
-                q_predictions.append(upflow8(Q))
                 dlta_flows.append(upflow8(delta_flow))
-            
             else:
                 flow_predictions.append(F)
-                q_predictions.append(Q)
                 dlta_flows.append(delta_flow)
 
+            if self.args.admm_solver:
+                Q, C, beta = self.admm_block(F, image1)
+                q.append(Q)
+                c.append(C)
+                betas.append(beta)
 
-        return flow_predictions, q_predictions, dlta_flows
+        return flow_predictions,(q,c,betas),dlta_flows
 
 

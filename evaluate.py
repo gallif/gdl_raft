@@ -27,21 +27,32 @@ def validate_chairs(args, model, iters=12):
 
     val_dataset = datasets.FlyingChairs(args, do_augument=False)
     print('Evaluating over FlyingChairs...')    
-
+    
+    tv_list = []
     epe_list = []
     for i in tqdm(range(len(val_dataset))):
+
         image1, image2, flow_gt, _ = val_dataset[i]
         image1 = image1[None].cuda()
         image2 = image2[None].cuda()
-        #image1 = F.pad(image1, [0, 0, pad, pad], mode='replicate')
-        #image2 = F.pad(image2, [0, 0, pad, pad], mode='replicate')
         with torch.no_grad():
-            flow_predictions = model.module(image1, image2, iters=iters)
+            flow_predictions, aux_vars, dlta_flows = model.module(image1, image2, iters=iters)
             flow_pr = flow_predictions[-1][0,:,:]
+        
         epe = torch.sum((flow_pr - flow_gt.cuda())**2, dim=0)
         epe = torch.sqrt(epe).mean()
+        tv = total_variation(flow_pr[None])
         epe_list.append(epe.item())
-    print("Validation (%s) EPE: %f" % ('Chairs', np.mean(epe_list)))
+        tv_list.append(tv.sum(dim=1).mean().item())
+
+        if args.save_images and i % SAVE_FREQ == 0:
+            display(image1[0,:,:], image2[0,:,:], flow_pr, flow_gt, os.path.join(args.log_dir,"{}__epe_{:.2f}__tv_{:.2f}.png".format(i,epe.item(),tv.sum(dim=1).mean().item())))
+            #display_flow_iterations(flow_predictions, os.path.join(args.log_dir, dstype + "_{}_flows.png".format(i)))
+            #display_flow_iterations(q_predictions, os.path.join(args.log_dir, dstype + "_{}_post_admm.png".format(i)))
+            #display_flow_iterations(dlta_flows, os.path.join(args.log_dir, dstype + "_{}_dlta_flows.png".format(i)))
+            #display_delta_flow_norms(dlta_flows, os.path.join(args.log_dir, dstype + "_{}_norms.png".format(i)))
+
+    print("Validation EPE: %.2f  TV: %.2f" % (np.mean(epe_list), np.mean(tv_list)))
 
 
 
@@ -64,8 +75,8 @@ def validate_sintel(args, model, iters=50):
             image2 = F.pad(image2, [0, 0, pad, pad], mode='replicate')
 
             with torch.no_grad():
-                flow_predictions, q_predictions, dlta_flows = model.module(image1, image2, iters=iters)
-                flow_pr = q_predictions[-1][0,:,pad:-pad]
+                flow_predictions, aux_vars, dlta_flows = model.module(image1, image2, iters=iters)
+                flow_pr = flow_predictions[-1][0,:,pad:-pad]
 
             epe = torch.sum((flow_pr - flow_gt.cuda())**2, dim=0)
             epe = torch.sqrt(epe).mean()
@@ -74,11 +85,11 @@ def validate_sintel(args, model, iters=50):
             tv_list.append(tv.sum(dim=1).mean().item())
 
             if args.save_images and i % SAVE_FREQ == 0:
-                #display(image1[0,:,pad:-pad], image2[0,:,pad:-pad], flow_pr, flow_gt, os.path.join(args.log_dir, dstype + "_{}__epe_{:.2f}__tv_{:.2f}.png".format(i,epe.item(),tv.sum(dim=1).mean().item())))
-                display_flow_iterations(flow_predictions, os.path.join(args.log_dir, dstype + "_{}_flows.png".format(i)))
-                display_flow_iterations(q_predictions, os.path.join(args.log_dir, dstype + "_{}_post_admm.png".format(i)))
-                display_flow_iterations(dlta_flows, os.path.join(args.log_dir, dstype + "_{}_dlta_flows.png".format(i)))
-                display_delta_flow_norms(dlta_flows, os.path.join(args.log_dir, dstype + "_{}_norms.png".format(i)))
+                display(image1[0,:,pad:-pad], image2[0,:,pad:-pad], flow_pr, flow_gt, os.path.join(args.log_dir, dstype + "_{}__epe_{:.2f}__tv_{:.2f}.png".format(i,epe.item(),tv.sum(dim=1).mean().item())))
+                #display_flow_iterations(flow_predictions, os.path.join(args.log_dir, dstype + "_{}_flows.png".format(i)))
+                #display_flow_iterations(q_predictions, os.path.join(args.log_dir, dstype + "_{}_post_admm.png".format(i)))
+                #display_flow_iterations(dlta_flows, os.path.join(args.log_dir, dstype + "_{}_dlta_flows.png".format(i)))
+                #display_delta_flow_norms(dlta_flows, os.path.join(args.log_dir, dstype + "_{}_norms.png".format(i)))
 
         print("Validation (%s) EPE: %.2f  TV: %.2f" % (dstype, np.mean(epe_list), np.mean(tv_list)))
 

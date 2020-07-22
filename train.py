@@ -36,6 +36,52 @@ EVAL_FREQ = 1000
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
+def admm_loss(flow_preds, aux_vars, flow_gt, valid, fidelity_func = 'l1', rho = 0.0):
+    """ ADMM dervied Loss function defined over F,Q,C,beta of all iterations."""
+
+    n_predictions = len(flow_preds)    
+    fidelity_loss = 0.0
+    reg_loss = 0.0
+    # extract admm auxiliary vars
+    q,c,betas = aux_vars
+    # exlude invalid pixels and extremely large diplacements
+    valid = (valid >= 0.5) & (flow_gt.abs().sum(dim=1) < MAX_FLOW)
+
+    for i in range(n_predictions):
+        i_weight = 0.8**(n_predictions - i - 1)
+        
+        if fidelity_func == 'l1':
+            i_loss = (flow_preds[i] - flow_gt).abs()
+        elif fidelity_func == 'l2':
+            i_loss = (flow_preds[i] - flow_gt)**2
+        
+        if rho > 0.0:
+            i_reg = 0.5 * rho * (q[i] - c[i] + betas[i])**2
+        else:
+            i_reg = 0.0
+
+        fidelity_loss += (valid[:, None] * i_weight * i_loss).mean()
+        reg_loss += i_reg.mean()
+        
+    flow_loss = fidelity_loss + reg_loss
+
+    epe = torch.sum((flow_preds[-1] - flow_gt)**2, dim=1).sqrt()
+    epe = epe.view(-1)[valid.view(-1)]
+
+    metrics = {
+        'loss': flow_loss.item(),
+        'fid':  fidelity_loss.item(),
+        'reg':  reg_loss.item(),
+        'epe':  epe.mean().item(),
+        '1px':  (epe < 1).float().mean().item(),
+        '3px':  (epe < 3).float().mean().item(),
+        '5px':  (epe < 5).float().mean().item(),
+    }
+    
+    return flow_loss, metrics
+
+
+
 def triplet_sequence_loss(flow_preds, q_preds, flow_gt, valid, fidelity_func = 'l1', q_weight = 0.0):
     """ Loss function defined over sequence of flow predictions """
 
@@ -217,7 +263,7 @@ def validate(args,model,valid_loader,tb_logger,step):
     with torch.no_grad():
         for i_batch, data_blob in tqdm(enumerate(valid_loader)):
             image1, image2, flow_gt, valid = [x.cuda() for x in data_blob]
-            flow_preds = model(image1, image2, iters=args.eval_iters)
+            flow_preds,_,_ = model(image1, image2, iters=args.eval_iters)
             # measure epe in batch
             valid = (valid >= 0.5) & (flow_gt.abs().sum(dim=1) < MAX_FLOW)
 
@@ -285,13 +331,15 @@ def train(args):
             optimizer.zero_grad()
             
             # forward
-            flow_predictions, q_predictions, _ = model(image1, image2, iters=args.iters)
+            flow_predictions, aux_vars, _ = model(image1, image2, iters=args.iters)
             
             # loss function
             if args.loss_func == 'sequence':
                 loss, metrics = sequence_loss(flow_predictions, flow, valid, sup_loss=args.sup_loss, tv_weight = args.tv_weight)
             elif args.loss_func == 'triplet':
-                loss, metrics = triplet_sequence_loss(flow_predictions, q_predictions, flow, valid, fidelity_func=args.sup_loss, q_weight = args.q_weight)
+                loss, metrics = triplet_sequence_loss(flow_predictions, aux_vars, flow, valid, fidelity_func=args.sup_loss, q_weight = args.q_weight)
+            elif args.loss_func == 'admm':
+                loss, metrics = admm_loss(flow_predictions, aux_vars, flow, valid, fidelity_func=args.sup_loss, rho=args.admm_rho)
 
             # backward
             loss.backward()
@@ -384,8 +432,11 @@ if __name__ == '__main__':
     parser.add_argument('--admm_iters',type=int,default=1)
     parser.add_argument('--admm_mask', action='store_true', help='apply mask within admm block')
     parser.add_argument('--admm_lamb', type=float, default=0.4)
-    parser.add_argument('--admm_rho', type=float, default=0.4)
-    parser.add_argument('--admm_eta', type=float, default=0.4)
+    parser.add_argument('--learn_lamb', action='store_true')
+    parser.add_argument('--admm_rho', type=float, default=1)
+    parser.add_argument('--admm_eta', type=float, default=0.1)
+    parser.add_argument('--learn_eta', action='store_true')
+
 
     parser.add_argument('--iters', type=int, default=12)
     parser.add_argument('--wdecay', type=float, default=.00005)
