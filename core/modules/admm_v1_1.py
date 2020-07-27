@@ -40,7 +40,10 @@ class ADMMSolverBlock(nn.Module):
 class SoftThresholding(nn.Module):
     def __init__(self,rho,lamb,learn_lamb=False):
         super(SoftThresholding, self).__init__()
-        self.lamb = nn.Parameter(torch.tensor(lamb),requires_grad=learn_lamb)
+        if learn_lamb:
+            self.lamb = nn.Parameter(torch.rand(1,requires_grad=True))
+        else:
+            self.lamb = torch.tensor(lamb,requires_grad=False)
         self.rho = rho
     
     def forward(self,C, beta, mask):
@@ -59,7 +62,10 @@ class SoftThresholding(nn.Module):
 class MultiplierUpdate(nn.Module):
     def __init__(self, eta, learn_eta=False):
         super(MultiplierUpdate,self).__init__()
-        self.eta = nn.Parameter(torch.tensor(eta),requires_grad=learn_eta)
+        if learn_eta:
+            self.eta = nn.Parameter(torch.rand(1,requires_grad=True))
+        else:
+            self.eta = torch.tensor(eta,requires_grad=False)
 
     def forward(self, Q, C, beta):
         beta = beta + self.eta.cuda() * (Q - C)

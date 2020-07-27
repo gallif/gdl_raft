@@ -36,7 +36,7 @@ EVAL_FREQ = 1000
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-def admm_loss(flow_preds, aux_vars, flow_gt, valid, fidelity_func = 'l1', rho = 0.0):
+def admm_loss(flow_preds, aux_vars, flow_gt, valid, fidelity_func = 'l1', rho = 0.0, params_dict = {}):
     """ ADMM dervied Loss function defined over F,Q,C,beta of all iterations."""
 
     n_predictions = len(flow_preds)    
@@ -66,19 +66,23 @@ def admm_loss(flow_preds, aux_vars, flow_gt, valid, fidelity_func = 'l1', rho = 
     flow_loss = fidelity_loss + reg_loss
 
     epe = torch.sum((flow_preds[-1] - flow_gt)**2, dim=1).sqrt()
+    tv = total_variation(flow_preds[-1]).sum(dim=1)
     epe = epe.view(-1)[valid.view(-1)]
+    tv = tv.view(-1)[valid.view(-1)]
+
 
     metrics = {
         'loss': flow_loss.item(),
         'fid':  fidelity_loss.item(),
         'reg':  reg_loss.item(),
         'epe':  epe.mean().item(),
+        'tv':   tv.mean().item(),
         '1px':  (epe < 1).float().mean().item(),
         '3px':  (epe < 3).float().mean().item(),
         '5px':  (epe < 5).float().mean().item(),
     }
     
-    return flow_loss, metrics
+    return flow_loss, {**metrics,**params_dict}
 
 
 
@@ -333,13 +337,17 @@ def train(args):
             # forward
             flow_predictions, aux_vars, _ = model(image1, image2, iters=args.iters)
             
+            # keep track of specific admm params
+            admm_params_dict = {'lamb': model.module.admm_block.SoftThresh.lamb.item(),
+                                'eta': model.module.admm_block.UpdateMul.eta.item()}
+
             # loss function
             if args.loss_func == 'sequence':
                 loss, metrics = sequence_loss(flow_predictions, flow, valid, sup_loss=args.sup_loss, tv_weight = args.tv_weight)
             elif args.loss_func == 'triplet':
                 loss, metrics = triplet_sequence_loss(flow_predictions, aux_vars, flow, valid, fidelity_func=args.sup_loss, q_weight = args.q_weight)
             elif args.loss_func == 'admm':
-                loss, metrics = admm_loss(flow_predictions, aux_vars, flow, valid, fidelity_func=args.sup_loss, rho=args.admm_rho)
+                loss, metrics = admm_loss(flow_predictions, aux_vars, flow, valid, fidelity_func=args.sup_loss, rho=args.admm_rho, params_dict=admm_params_dict)
 
             # backward
             loss.backward()
@@ -433,8 +441,8 @@ if __name__ == '__main__':
     parser.add_argument('--admm_mask', action='store_true', help='apply mask within admm block')
     parser.add_argument('--admm_lamb', type=float, default=0.4)
     parser.add_argument('--learn_lamb', action='store_true')
-    parser.add_argument('--admm_rho', type=float, default=1)
-    parser.add_argument('--admm_eta', type=float, default=0.1)
+    parser.add_argument('--admm_rho', type=float, default=0.01)
+    parser.add_argument('--admm_eta', type=float, default=0.01)
     parser.add_argument('--learn_eta', action='store_true')
 
 
@@ -445,8 +453,8 @@ if __name__ == '__main__':
     parser.add_argument('--dropout', type=float, default=0.0)
     args = parser.parse_args()
 
-    torch.manual_seed(1234)
-    np.random.seed(1234)
+    #torch.manual_seed(1234)
+    #np.random.seed(1234)
 
     # scale learning rate and batch size by number of GPUs
     os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda_devices

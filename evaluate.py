@@ -18,7 +18,7 @@ from core.raft import RAFT
 from demo import display, display_flow_iterations, display_delta_flow_norms
 from train import total_variation
 
-SAVE_FREQ = 50
+SAVE_FREQ = 1000
 
 def validate_chairs(args, model, iters=12):
     """ Evaluate trained model on Flying Chairs """
@@ -144,11 +144,13 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=1)
     
     parser.add_argument('--admm_solver', action='store_true', help='apply admm block')
-    parser.add_argument('--admm_mask',action='store_true', help='apply mask within admm block')
     parser.add_argument('--admm_iters',type=int,default=1)
+    parser.add_argument('--admm_mask', action='store_true', help='apply mask within admm block')
     parser.add_argument('--admm_lamb', type=float, default=0.4)
-    parser.add_argument('--admm_rho', type=float, default=0.4)
-    parser.add_argument('--admm_eta', type=float, default=0.4)
+    parser.add_argument('--learn_lamb', action='store_true')
+    parser.add_argument('--admm_rho', type=float, default=1)
+    parser.add_argument('--admm_eta', type=float, default=0.1)
+    parser.add_argument('--learn_eta', action='store_true')
 
     args = parser.parse_args()
     args.log_dir = os.path.join(os.getcwd(), 'out', args.name)
