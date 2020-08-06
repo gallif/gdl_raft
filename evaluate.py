@@ -9,12 +9,14 @@ import time
 import numpy as np
 import torch
 import torch.nn.functional as F
+import matplotlib
+matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
 import core.datasets as datasets
 from core.utils import flow_viz
-from core.raft import RAFT
+from core.raft_v2_0 import RAFT
 from demo import display, display_flow_iterations, display_delta_flow_norms
 from train import total_variation
 
@@ -46,11 +48,13 @@ def validate_chairs(args, model, iters=12):
         tv_list.append(tv.sum(dim=1).mean().item())
 
         if args.save_images and i % SAVE_FREQ == 0:
-            display(image1[0,:,:], image2[0,:,:], flow_pr, flow_gt, os.path.join(args.log_dir,"{}__epe_{:.2f}__tv_{:.2f}.png".format(i,epe.item(),tv.sum(dim=1).mean().item())))
-            #display_flow_iterations(flow_predictions, os.path.join(args.log_dir, dstype + "_{}_flows.png".format(i)))
-            #display_flow_iterations(q_predictions, os.path.join(args.log_dir, dstype + "_{}_post_admm.png".format(i)))
-            #display_flow_iterations(dlta_flows, os.path.join(args.log_dir, dstype + "_{}_dlta_flows.png".format(i)))
-            #display_delta_flow_norms(dlta_flows, os.path.join(args.log_dir, dstype + "_{}_norms.png".format(i)))
+            #display(image1[0,:,:], image2[0,:,:], flow_pr, flow_gt, os.path.join(args.log_dir,"{}__epe_{:.2f}__tv_{:.2f}.png".format(i,epe.item(),tv.sum(dim=1).mean().item())))
+            display_flow_iterations(flow_predictions, os.path.join(args.log_dir, "{}_flows.png".format(i)))
+            display_flow_iterations(aux_vars, os.path.join(args.log_dir, "{}_q.png".format(i)))
+            display_flow_iterations(dlta_flows, os.path.join(args.log_dir, "{}_dlta_flows.png".format(i)))
+            display_delta_flow_norms(dlta_flows, os.path.join(args.log_dir, "{}_df_norms.png".format(i)))
+            display_delta_flow_norms(aux_vars, os.path.join(args.log_dir, "{}_dq_norms.png".format(i)))
+
 
     print("Validation EPE: %.2f  TV: %.2f" % (np.mean(epe_list), np.mean(tv_list)))
 
@@ -158,6 +162,8 @@ if __name__ == '__main__':
 
     if args.dataset == 'sintel':
         args.image_size = [440, 1024]
+    elif args.dataset == 'chairs':
+        args.image_size = [384, 512]
 
     print('----Script Args----')
     for arg in vars(args):

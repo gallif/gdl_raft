@@ -21,7 +21,7 @@ import torch.nn.functional as F
 from logger import TBLogger
 from pathlib import Path
 from torch.utils.data import DataLoader
-from core.raft import RAFT
+from core.raft_v2_0 import RAFT
 import core.datasets as datasets
 from core.utils.flow_viz import flow_to_image
 from core.utils.utils import dump_args_to_text
@@ -338,8 +338,8 @@ def train(args):
             flow_predictions, aux_vars, _ = model(image1, image2, iters=args.iters)
             
             # keep track of specific admm params
-            admm_params_dict = {'lamb': model.module.admm_block.SoftThresh.lamb.item(),
-                                'eta': model.module.admm_block.UpdateMul.eta.item()}
+            #admm_params_dict = {'lamb': model.module.admm_block.SoftThresh.lamb.item(),
+            #                    'eta': model.module.admm_block.UpdateMul.eta.item()}
 
             # loss function
             if args.loss_func == 'sequence':
@@ -389,7 +389,13 @@ def train(args):
                     err_batch = [(np.sum(np.abs(pr - gt)**2, axis=2,keepdims=True)**0.5).astype(np.uint8) for pr,gt in zip(pred_batch, gt_batch)]
                     err_vis = [np.concatenate([gt, pr, np.tile(err,(1,1,3))], axis=0) for gt, pr, err in zip(gt_list, pr_list,err_batch )]
                     tb_logger.image_summary(f'Error', err_vis, total_steps)
-            
+
+                    # Masks
+                    Mx, My = aux_vars[1]
+                    masks = [(255*np.concatenate([mx,my],axis=2)).astype(np.uint8).squeeze() for mx,my in zip(np.array(Mx.detach().cpu()).tolist(), np.array(My.detach().cpu()).tolist())]
+                    tb_logger.image_summary(f'Masks', masks, total_steps)
+
+
             if total_steps % EVAL_FREQ == EVAL_FREQ-1 and args.run_eval:
                 validate(args,model,valid_loader,tb_logger,total_steps)
 

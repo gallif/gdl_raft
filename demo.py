@@ -15,7 +15,7 @@ from matplotlib import pyplot as plt
 
 import datasets
 from utils import flow_viz
-from raft import RAFT
+from raft_v2_0 import RAFT
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 DEVICE = 'cuda'

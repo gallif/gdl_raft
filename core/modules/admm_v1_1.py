@@ -49,7 +49,7 @@ class SoftThresholding(nn.Module):
     def forward(self,C, beta, mask):
         # apply mask
         if mask is not None:
-            th = mask * torch.ones_like(C) * self.lamb.cuda() / self.rho
+            th = mask * self.lamb.cuda() / self.rho
         else:
             th = torch.ones_like(C) * self.lamb.cuda() / self.rho
 
@@ -83,7 +83,7 @@ class MaskGenerator(nn.Module):
         # use gradient of source image
         im_gray = (image * torch.tensor([[[[0.2989]],[[0.5870]],[[0.1140]]]], dtype= torch.float).cuda()).sum(dim=1,keepdim=True)
         grads = self.CalcGrad(im_gray)
-        mask = torch.exp(-torch.sum(grads**2, dim=1, keepdim=True).sqrt()) 
+        mask = torch.exp(-grads.abs()).repeat(1,2,1,1)
         return mask
 
 class SpatialGradients(nn.Module):
@@ -98,6 +98,4 @@ class SpatialGradients(nn.Module):
         # apply filter over each channel seperately
         im_ch = torch.split(image, 1, dim = 1)
         grad_ch = [F.conv2d(ch, self.D.cuda(), padding = 1) for ch in im_ch]
-        #Du = F.conv2d(u, D, padding = 1)
-        #Dv = F.conv2d(v, D, padding = 1)
         return torch.cat(grad_ch, dim=1)
