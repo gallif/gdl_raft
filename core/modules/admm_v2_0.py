@@ -16,6 +16,11 @@ class ADMMInitiator(nn.Module):
         self.admm_mask = admm_mask
         if admm_mask:
             self.masks_gen = MaskGenerator()
+    
+    def update_matrices_for_eval(self,shape):
+        Dx, Dy = Kernel2MatrixConvertor(shape).D
+        self.Dx = nn.Parameter(Dx, requires_grad = False)
+        self.Dy = nn.Parameter(Dy, requires_grad = False)
 
     def forward(self, image):
         # Extract D matrices
@@ -101,6 +106,14 @@ class ADMMSolverBlockPerChannel(nn.Module):
         self.Beta_y = torch.zeros((shape[2],(shape[0]+pad)*(shape[1]+pad),1))
         self.Z_x = torch.zeros((shape[2],(shape[0]+pad)*(shape[1]+pad),1))
         self.Z_y = torch.zeros((shape[2],(shape[0]+pad)*(shape[1]+pad),1))
+    
+    def update_matrices_for_eval(self,shape):
+        pad = self.pad
+        self.Beta_x = torch.zeros((1,(shape[0]+pad)*(shape[1]+pad),1))
+        self.Beta_y = torch.zeros((1,(shape[0]+pad)*(shape[1]+pad),1))
+        self.Z_x = torch.zeros((1,(shape[0]+pad)*(shape[1]+pad),1))
+        self.Z_y = torch.zeros((1,(shape[0]+pad)*(shape[1]+pad),1))
+
 
     def forward(self,F, M, B):
         # Extract hidden variables

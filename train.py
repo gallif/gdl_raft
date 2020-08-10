@@ -181,20 +181,20 @@ def fetch_dataloader(args):
     """ Create the data loader for the corresponding trainign set """
 
     if args.dataset == 'chairs':
-        train_dataset = datasets.FlyingChairs(args, root=args.data_dir, image_size=args.image_size)
+        train_dataset = datasets.FlyingChairs(args, root=args.data_dir, image_size=args.curr_image_size)
     
     elif args.dataset == 'things':
-        clean_dataset = datasets.SceneFlow(args, root=args.data_dir, image_size=args.image_size, dstype='frames_cleanpass')
-        final_dataset = datasets.SceneFlow(args, root=args.data_dir, image_size=args.image_size, dstype='frames_finalpass')
+        clean_dataset = datasets.SceneFlow(args, root=args.data_dir, image_size=args.curr_image_size, dstype='frames_cleanpass')
+        final_dataset = datasets.SceneFlow(args, root=args.data_dir, image_size=args.curr_image_size, dstype='frames_finalpass')
         train_dataset = clean_dataset + final_dataset
 
     elif args.dataset == 'sintel':
-        clean_dataset = datasets.MpiSintel(args, image_size=args.image_size, dstype='clean')
-        final_dataset = datasets.MpiSintel(args, image_size=args.image_size, dstype='final')
+        clean_dataset = datasets.MpiSintel(args, image_size=args.curr_image_size, dstype='clean')
+        final_dataset = datasets.MpiSintel(args, image_size=args.curr_image_size, dstype='final')
         train_dataset = clean_dataset + final_dataset
 
     elif args.dataset == 'kitti':
-        train_dataset = datasets.KITTI(args, image_size=args.image_size, is_val=False)
+        train_dataset = datasets.KITTI(args, image_size=args.curr_image_size, is_val=False)
 
 
     gpuargs = {'num_workers': 4, 'drop_last' : True}
@@ -203,7 +203,7 @@ def fetch_dataloader(args):
     
     if args.run_eval:
         if args.eval_dataset == 'sintel':
-            valid_dataset = datasets.MpiSintel(args, image_size=args.image_size, dstype='clean', root=args.eval_dir)
+            valid_dataset = datasets.MpiSintel(args, image_size=args.curr_image_size, dstype='clean', root=args.eval_dir)
 
         valid_loader = DataLoader(valid_dataset, batch_size=args.batch_size, 
             pin_memory=True, shuffle=True, **gpuargs)
@@ -313,6 +313,12 @@ def train(args):
 
     if args.restore_ckpt is not None:
         model.load_state_dict(torch.load(args.restore_ckpt))
+
+    if args.image_size != args.curr_image_size:
+        model.module.admm_init.update_matrices_for_eval(shape=[sh // 8 for sh in args.curr_image_size])
+        model.module.admm_block.u_solver.update_matrices_for_eval(shape=[sh // 8 for sh in args.curr_image_size])
+        model.module.admm_block.v_solver.update_matrices_for_eval(shape=[sh // 8 for sh in args.curr_image_size])
+        print('Updated D matrices. Train image size is {}, Eval image size is {}'.format(args.image_size, args.curr_image_size))
 
     model.cuda()
     
@@ -441,6 +447,7 @@ if __name__ == '__main__':
     parser.add_argument('--initial_step', type=int, default=0)
     parser.add_argument('--batch_size', type=int, default=6)
     parser.add_argument('--image_size', type=int, nargs='+', default=[384, 512])
+    parser.add_argument('--curr_image_size', type=int, nargs='+', default=[384, 512])
 
     parser.add_argument('--admm_solver', action='store_true', help='apply admm block')
     parser.add_argument('--admm_iters',type=int,default=1)
